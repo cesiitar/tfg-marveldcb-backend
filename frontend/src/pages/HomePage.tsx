@@ -29,53 +29,6 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-16">
-        <h2 className="text-3xl font-bold text-center text-secondary-800 mb-12">
-          ¿Por qué elegir MarvelCDB?
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="bg-white rounded-xl p-8 shadow-lg hover:shadow-xl transition-shadow duration-300">
-            <div className="w-12 h-12 bg-accent-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-accent-600" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-secondary-800 mb-3">Gestión de Mazos</h3>
-            <p className="text-secondary-600">
-              Crea y organiza tus mazos de cartas de manera intuitiva. 
-              Comparte tus creaciones con la comunidad.
-            </p>
-          </div>
-
-          <div className="bg-white rounded-xl p-8 shadow-lg hover:shadow-xl transition-shadow duration-300">
-            <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-primary-600" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z"/>
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-secondary-800 mb-3">Base de Datos Completa</h3>
-            <p className="text-secondary-600">
-              Accede a una extensa colección de cartas Marvel con información 
-              detallada y estadísticas actualizadas.
-            </p>
-          </div>
-
-          <div className="bg-white rounded-xl p-8 shadow-lg hover:shadow-xl transition-shadow duration-300">
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-green-600" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.54 8H16c-.8 0-1.54.37-2.01.99L12 11l-1.99-2.01A2.5 2.5 0 0 0 8 8H5.46c-.8 0-1.54.37-2.01.99L.91 16.37 3.5 22H6v-6h2v6h2v-6h2v6h2v-6h2v6h2z"/>
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-secondary-800 mb-3">Comunidad Activa</h3>
-            <p className="text-secondary-600">
-              Conecta con otros coleccionistas, comparte estrategias y 
-              participa en eventos de la comunidad.
-            </p>
-          </div>
-        </div>
-      </section>
-
       {/* Featured Decks Section */}
       <section className="py-16 bg-white rounded-2xl shadow-lg">
         <div className="flex justify-between items-center mb-8">
