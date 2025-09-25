@@ -23,27 +23,25 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS card_sets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    release_date TEXT,
     card_count INTEGER DEFAULT 0
 )
 ''')
 
 # Insertar datos de prueba - Sets
 sets_data = [
-    ('Core Set', 'El conjunto base con los héroes fundamentales de Marvel', '2020', 15),
-    ('The Green Goblin', 'Enfrenta al infame villano de Spider-Man', '2020', 12),
-    ('Captain America', 'El primer vengador lidera la lucha', '2020', 10),
-    ('Ms. Marvel', 'La nueva generación de héroes llega', '2021', 8),
-    ('Thor', 'El dios del trueno desata su poder', '2021', 9),
-    ('Black Widow', 'La espía más letal del mundo', '2021', 7),
-    ('Doctor Strange', 'El hechicero supremo protege la realidad', '2021', 11),
-    ('Hulk', 'El gigante verde más fuerte que existe', '2021', 6)
+    ('Core Set',),
+    ('The Green Goblin',),
+    ('Captain America',),
+    ('Ms. Marvel',),
+    ('Thor',),
+    ('Black Widow',),
+    ('Doctor Strange',),
+    ('Hulk',)
 ]
 
 cursor.executemany('''
-INSERT OR IGNORE INTO card_sets (name, description, release_date, card_count) 
-VALUES (?, ?, ?, ?)
+INSERT OR IGNORE INTO card_sets (name) 
+VALUES (?)
 ''', sets_data)
 
 # Insertar cartas de prueba - Solo los atributos esenciales

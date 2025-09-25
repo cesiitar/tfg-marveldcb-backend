@@ -21,6 +21,15 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
     return conn
 
+def initialize_database():
+    """Inicializar la base de datos si no existe"""
+    import os
+    if not os.path.exists('marvel_cards.db'):
+        print("Base de datos no encontrada. Ejecutando setup_database.py...")
+        import subprocess
+        subprocess.run(['python', 'setup_database.py'])
+        print("Base de datos inicializada correctamente.")
+
 @app.get("/")
 async def root():
     return {"message": "MarvelCDB API está funcionando!"}
@@ -32,9 +41,10 @@ async def get_sets():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, name, description, release_date, card_count 
+        SELECT id, name, 
+               (SELECT COUNT(*) FROM cards WHERE set_name = card_sets.name) as card_count
         FROM card_sets 
-        ORDER BY release_date, name
+        ORDER BY id
     ''')
     
     sets = []
@@ -42,8 +52,6 @@ async def get_sets():
         sets.append({
             "id": row["id"],
             "name": row["name"],
-            "description": row["description"],
-            "releaseDate": row["release_date"],
             "cardCount": row["card_count"]
         })
     
@@ -176,5 +184,8 @@ async def search_cards(
     return {"cards": cards}
 
 if __name__ == "__main__":
+    # Inicializar base de datos si es necesario
+    initialize_database()
+    
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

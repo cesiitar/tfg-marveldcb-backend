@@ -1,147 +1,158 @@
-# MarvelCDB - TFG Project
+# MarvelCDB - Marvel Champions Database
 
-Una plataforma web moderna para coleccionistas de cartas Marvel, inspirada en MarvelCDB.com pero con un diseño propio y funcionalidades personalizadas.
+Una aplicación web para gestionar y explorar cartas del juego Marvel Champions.
 
 ## 🚀 Características
 
-- **Frontend Moderno**: React + TypeScript + Vite + Tailwind CSS
-- **Backend Robusto**: Python + FastAPI (próximamente)
-- **Diseño Responsivo**: Optimizado para móviles y escritorio
-- **Navegación Intuitiva**: React Router para navegación fluida
-- **UI/UX Atractiva**: Diseño moderno con gradientes y animaciones
+- **Búsqueda de cartas** con filtros avanzados
+- **Gestión de sets** de cartas
+- **API REST** con FastAPI
+- **Interfaz moderna** con React + TypeScript
+- **Base de datos SQLite** para almacenamiento local
+
+## 📋 Requisitos
+
+- **Node.js** 16+ 
+- **Python** 3.8+
+- **npm** o **yarn**
+
+## 🛠️ Instalación y Configuración
+
+### 1. Clonar el repositorio
+```bash
+git clone <tu-repo-url>
+cd tfg-marveldcb
+```
+
+### 2. Configurar Backend (Python)
+
+```bash
+cd Backend
+
+# Instalar dependencias Python
+py -m pip install -r requirements.txt
+
+# Inicializar base de datos
+py setup_database.py
+
+# Ejecutar servidor (puerto 8000)
+py main.py
+```
+
+### 3. Configurar Frontend (React)
+
+```bash
+cd frontend
+
+# Instalar dependencias Node.js
+npm install
+
+# Ejecutar servidor de desarrollo
+npm run dev
+```
+
+## 🌐 URLs
+
+- **Frontend**: http://localhost:3000 (o 3001 si 3000 está ocupado)
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
 ## 📁 Estructura del Proyecto
 
 ```
 tfg-marveldcb/
-├── frontend/                 # Aplicación React
+├── Backend/
+│   ├── main.py              # API FastAPI
+│   ├── setup_database.py    # Configuración de BD
+│   ├── requirements.txt     # Dependencias Python
+│   └── marvel_cards.db      # Base de datos SQLite
+├── frontend/
 │   ├── src/
-│   │   ├── components/       # Componentes reutilizables
-│   │   │   ├── Layout.tsx
-│   │   │   ├── Header.tsx
-│   │   │   └── Footer.tsx
-│   │   ├── pages/           # Páginas de la aplicación
-│   │   │   ├── HomePage.tsx
-│   │   │   ├── DecksPage.tsx
-│   │   │   ├── CardsPage.tsx
-│   │   │   └── FAQPage.tsx
-│   │   ├── types/           # Definiciones de TypeScript
-│   │   ├── assets/          # Imágenes y recursos
-│   │   ├── App.tsx          # Componente principal
-│   │   ├── main.tsx         # Punto de entrada
-│   │   └── index.css        # Estilos globales
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   └── tsconfig.json
-├── Backend/                 # API Python (en desarrollo)
-│   └── main.py
+│   │   ├── pages/           # Páginas React
+│   │   ├── components/      # Componentes reutilizables
+│   │   ├── services/        # Servicios API
+│   │   └── types/           # Tipos TypeScript
+│   ├── package.json         # Dependencias Node.js
+│   └── vite.config.ts       # Configuración Vite
 └── README.md
 ```
 
-## 🛠️ Tecnologías Utilizadas
+## 🔧 Comandos Útiles
 
-### Frontend
-- **React 18** - Biblioteca de UI
-- **TypeScript** - Tipado estático
-- **Vite** - Herramienta de construcción rápida
-- **Tailwind CSS** - Framework de CSS utilitario
-- **React Router** - Enrutamiento del lado del cliente
-- **Inter Font** - Tipografía moderna
-
-### Backend (Próximamente)
-- **Python 3.11+**
-- **FastAPI** - Framework web moderno
-- **PostgreSQL** - Base de datos relacional
-- **SQLAlchemy** - ORM
-
-## 🚀 Instalación y Ejecución
-
-### Prerrequisitos
-- Node.js 18+ 
-- npm o yarn
-- Python 3.11+ (para el backend)
-
-### Frontend
-
-1. **Instalar dependencias:**
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-2. **Ejecutar en modo desarrollo:**
-   ```bash
-   npm run dev
-   ```
-
-3. **Construir para producción:**
-   ```bash
-   npm run build
-   ```
-
-4. **Vista previa de producción:**
-   ```bash
-   npm run preview
-   ```
-
-### Backend (Próximamente)
+### Backend
 ```bash
-cd Backend
-pip install -r requirements.txt
-python main.py
+# Ejecutar servidor
+py main.py
+
+# Con recarga automática
+py -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Recrear base de datos
+py setup_database.py
 ```
 
-## 📱 Páginas Disponibles
+### Frontend
+```bash
+# Desarrollo
+npm run dev
 
-- **Inicio** (`/`) - Página principal con hero section y características
-- **Mazos** (`/decks`) - Gestión de colecciones de cartas
-- **Cartas** (`/cards`) - Exploración de base de datos de cartas
-- **FAQ** (`/faq`) - Preguntas frecuentes
+# Build para producción
+npm run build
 
-## 🎨 Diseño
+# Preview build
+npm run preview
+```
 
-El proyecto utiliza un sistema de diseño moderno con:
+## 🎯 Funcionalidades
 
-- **Paleta de colores**: Azules primarios con grises secundarios
-- **Tipografía**: Inter para una apariencia limpia y profesional
-- **Componentes**: Diseño modular y reutilizable
-- **Responsive**: Adaptable a todos los tamaños de pantalla
-- **Animaciones**: Transiciones suaves y efectos hover
+### ✅ Implementadas
+- [x] API REST con FastAPI
+- [x] Base de datos SQLite con cartas de prueba
+- [x] Búsqueda de cartas con filtros
+- [x] Interfaz de usuario moderna
+- [x] Navegación entre páginas
 
-## 🔮 Roadmap
+### 🚧 En desarrollo
+- [ ] Gestión de mazos
+- [ ] Sistema de usuarios
+- [ ] Más cartas en la base de datos
 
-### Fase 1 - Base (Actual)
-- ✅ Estructura del proyecto
-- ✅ Frontend básico con React
-- ✅ Diseño y navegación
-- ✅ Páginas principales
+## 🐛 Solución de Problemas
 
-### Fase 2 - Funcionalidad Core
-- [ ] Backend con FastAPI
-- [ ] Base de datos de cartas Marvel
-- [ ] Sistema de autenticación
-- [ ] CRUD de mazos
+### Puerto 3000 ocupado
+Si el frontend usa el puerto 3001:
+```bash
+# Verificar qué usa el puerto 3000
+netstat -ano | findstr :3000
 
-### Fase 3 - Características Avanzadas
-- [ ] Búsqueda y filtros avanzados
-- [ ] Compartir mazos
-- [ ] Sistema de comentarios
-- [ ] Estadísticas de cartas
+# Forzar puerto específico
+npm run dev -- --port 3000
+```
 
-### Fase 4 - IA y Machine Learning
-- [ ] Recomendaciones inteligentes
-- [ ] Análisis de mazos
-- [ ] Predicción de estrategias
+### Caché del navegador
+Si no ves cambios:
+- Refresco fuerte: `Ctrl + Shift + R`
+- Modo incógnito
+- Limpiar caché del navegador
 
-## 👨‍💻 Desarrollo
+### Dependencias Python
+Si hay problemas con pip:
+```bash
+py -m ensurepip --upgrade
+py -m pip install --upgrade pip
+```
 
-Este proyecto forma parte de un Trabajo de Fin de Grado (TFG) y está diseñado para demostrar habilidades en desarrollo web moderno, diseño de interfaces y arquitectura de software.
+## 📝 Notas de Desarrollo
 
-## 📄 Licencia
+- El backend se ejecuta en puerto 8000
+- El frontend se ejecuta en puerto 3000 (o 3001 si está ocupado)
+- La base de datos se crea automáticamente si no existe
+- Los cambios en el código se reflejan automáticamente (hot reload)
 
-Este proyecto es parte de un TFG académico. Todos los derechos reservados.
+## 🤝 Contribuir
 
----
-
-**Desarrollado con ❤️ para la comunidad de coleccionistas Marvel**
+1. Fork el proyecto
+2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request

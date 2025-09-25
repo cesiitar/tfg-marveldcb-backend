@@ -41,16 +41,16 @@ const CardsPage: React.FC = () => {
 
   const getSetIcon = (index: number) => {
     const icons = [
-      <svg className="w-8 h-8 text-red-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
+      <svg className="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
       </svg>,
-      <svg className="w-8 h-8 text-blue-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
+      <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
       </svg>,
-      <svg className="w-8 h-8 text-yellow-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
+      <svg className="w-4 h-4 text-yellow-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
       </svg>,
-      <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
+      <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 24 24" key={index}>
         <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
       </svg>
     ]
@@ -103,53 +103,37 @@ const CardsPage: React.FC = () => {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {sets.map((set, index) => (
-          <Link 
-            key={set.id}
-            to={`/cards/set/${set.id}`}
-            className={`bg-gradient-to-br ${getSetColor(index)} rounded-xl p-6 shadow-lg border-2 hover:shadow-xl transition-all duration-300 hover:scale-105`}
-          >
-            <div className="flex items-center mb-4">
-              <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center mr-4 shadow-md">
-                {getSetIcon(index)}
+      <div className="max-w-4xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {sets.map((set, index) => (
+            <Link 
+              key={set.id}
+              to={`/cards/set/${set.id}`}
+              className={`bg-gradient-to-br ${getSetColor(index)} rounded-lg p-4 shadow-md border hover:shadow-lg transition-all duration-200 hover:scale-102`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center mr-3 shadow-sm">
+                    {getSetIcon(index)}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-secondary-800 truncate">
+                      {set.name}
+                    </h3>
+                    <p className="text-xs text-secondary-600">
+                      {set.cardCount} cartas
+                    </p>
+                  </div>
+                </div>
+                <svg className="w-4 h-4 text-secondary-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
               </div>
-              <div>
-                <h2 className="text-2xl font-display font-bold text-secondary-800">
-                  {set.name}
-                </h2>
-                <p className="text-secondary-600">
-                  {set.cardCount} cartas
-                </p>
-              </div>
-            </div>
-            
-            <p className="text-secondary-700 mb-4">
-              {set.description}
-            </p>
-
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-secondary-500">
-                Lanzado en {set.releaseDate}
-              </span>
-              <svg className="w-5 h-5 text-secondary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          ))}
+        </div>
       </div>
 
-      {/* Search Section */}
-      <div className="bg-gradient-to-r from-primary-50 to-accent-50 rounded-xl p-8 text-center">
-        <h2 className="text-2xl font-semibold text-secondary-800 mb-4">
-          ¿No encuentras lo que buscas?
-        </h2>
-        <p className="text-secondary-600 mb-6">
-          Usa nuestro buscador avanzado para encontrar cartas específicas por nombre, aspecto, tipo, coste y más.
-        </p>
-      
-      </div>
     </div>
   )
 }

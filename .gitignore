@@ -25,19 +25,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# Logs
-logs
-*.log
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-
 # Python
 __pycache__/
 *.py[cod]
@@ -49,6 +36,26 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-# FastAPI
 .pytest_cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Temporary folders
+tmp/
+temp/

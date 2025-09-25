@@ -112,10 +112,10 @@ const SetCardsPage: React.FC = () => {
           {setInfo?.name}
         </h1>
         <p className="text-xl text-secondary-600 mb-2">
-          {setInfo?.description}
+          Cartas del set
         </p>
         <p className="text-secondary-500">
-          {cards.length} cartas • Lanzado en {setInfo?.releaseDate}
+          {cards.length} cartas disponibles
         </p>
       </div>
 
