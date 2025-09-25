@@ -59,3 +59,10 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+
+# Python packages (exclude all site-packages)
+Backend/Lib/
+Backend/Scripts/
+Backend/pip-*.dist-info/
+Backend/*.dist-info/
+Backend/site-packages/
