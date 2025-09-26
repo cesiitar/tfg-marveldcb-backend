@@ -31,7 +31,28 @@ const SetCardsPage: React.FC = () => {
         }
         
         setSetInfo(set)
-        setCards(cardsResponse.cards)
+        // Ordenar cartas por aspecto (clase), luego por coste, luego por nombre
+        const aspectOrder = ['hero', 'aggression', 'justice', 'leadership', 'protection', 'basic', 'campaign', 'pool']
+        const sortedCards = cardsResponse.cards.sort((a, b) => {
+          // Primero por aspecto
+          const aspectA = a.aspect || 'basic'
+          const aspectB = b.aspect || 'basic'
+          const aspectIndexA = aspectOrder.indexOf(aspectA)
+          const aspectIndexB = aspectOrder.indexOf(aspectB)
+          
+          if (aspectIndexA !== aspectIndexB) {
+            return aspectIndexA - aspectIndexB
+          }
+          
+          // Luego por coste
+          if (a.cost !== b.cost) {
+            return a.cost - b.cost
+          }
+          
+          // Finalmente por nombre
+          return a.name.localeCompare(b.name)
+        })
+        setCards(sortedCards)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error desconocido')
       } finally {
@@ -44,10 +65,14 @@ const SetCardsPage: React.FC = () => {
 
   const getAspectColor = (aspect: string) => {
     switch (aspect) {
+      case 'hero': return 'bg-purple-100 text-purple-800 border-purple-200'
       case 'aggression': return 'bg-red-100 text-red-800 border-red-200'
       case 'justice': return 'bg-blue-100 text-blue-800 border-blue-200'
       case 'leadership': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
       case 'protection': return 'bg-green-100 text-green-800 border-green-200'
+      case 'basic': return 'bg-gray-100 text-gray-800 border-gray-200'
+      case 'campaign': return 'bg-orange-100 text-orange-800 border-orange-200'
+      case 'pool': return 'bg-teal-100 text-teal-800 border-teal-200'
       default: return 'bg-gray-100 text-gray-800 border-gray-200'
     }
   }
@@ -112,38 +137,91 @@ const SetCardsPage: React.FC = () => {
           {setInfo?.name}
         </h1>
         <p className="text-xl text-secondary-600 mb-2">
-          Cartas del set
+          {setInfo?.description}
         </p>
         <p className="text-secondary-500">
-          {cards.length} cartas disponibles
+          {cards.length} cartas • Lanzado en {setInfo?.releaseDate}
         </p>
       </div>
 
-      {/* Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {cards.map((card) => (
-          <div key={card.id} className="bg-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-shadow duration-300 border-2 border-transparent hover:border-accent-200">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="text-lg font-semibold text-secondary-800 pr-2">
-                {card.name}
-              </h3>
-              <span className="bg-accent-500 text-white px-2 py-1 rounded text-sm font-bold flex-shrink-0">
-                {card.cost}
-              </span>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <span className={`px-2 py-1 rounded text-xs font-medium border ${getAspectColor(card.aspect)}`}>
-                  {card.aspect}
-                </span>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getTypeColor(card.type)}`}>
-                  {card.type}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
+      {/* Cards Table */}
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gradient-to-r from-primary-50 to-accent-50">
+              <tr>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-secondary-700 uppercase tracking-wider">
+                  Carta
+                </th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-secondary-700 uppercase tracking-wider">
+                  Aspecto
+                </th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-secondary-700 uppercase tracking-wider">
+                  Tipo
+                </th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-secondary-700 uppercase tracking-wider">
+                  Coste
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {cards.map((card, index) => {
+                const prevCard = index > 0 ? cards[index - 1] : null
+                const isNewAspect = !prevCard || prevCard.aspect !== card.aspect
+                
+                return (
+                  <React.Fragment key={card.id}>
+                    {isNewAspect && (
+                      <tr className="bg-gray-100">
+                        <td colSpan={4} className="px-6 py-3">
+                          <div className="flex items-center">
+                            <span className={`px-3 py-1 rounded-full text-sm font-bold border ${getAspectColor(card.aspect)}`}>
+                              {card.aspect.toUpperCase()}
+                            </span>
+                            <span className="ml-2 text-sm text-gray-600">
+                              ({cards.filter(c => c.aspect === card.aspect).length} cartas)
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    <tr className={`hover:bg-gray-50 transition-colors duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-25'}`}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="w-8 h-8 bg-accent-100 rounded-lg flex items-center justify-center mr-3">
+                            <span className="text-sm font-bold text-accent-700">
+                              {card.id}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-secondary-800">
+                              {card.name}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getAspectColor(card.aspect)}`}>
+                          {card.aspect}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getTypeColor(card.type)}`}>
+                          {card.type}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="bg-accent-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                          {card.cost}
+                        </span>
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {cards.length === 0 && (

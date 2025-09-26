@@ -10,5 +10,7 @@ export interface Card {
 export interface CardSet {
   id: number
   name: string
+  description: string
+  releaseDate: string
   cardCount: number
 }

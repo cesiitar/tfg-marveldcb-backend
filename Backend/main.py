@@ -21,15 +21,6 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
     return conn
 
-def initialize_database():
-    """Inicializar la base de datos si no existe"""
-    import os
-    if not os.path.exists('marvel_cards.db'):
-        print("Base de datos no encontrada. Ejecutando setup_database.py...")
-        import subprocess
-        subprocess.run(['python', 'setup_database.py'])
-        print("Base de datos inicializada correctamente.")
-
 @app.get("/")
 async def root():
     return {"message": "MarvelCDB API está funcionando!"}
@@ -41,18 +32,85 @@ async def get_sets():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, name, 
-               (SELECT COUNT(*) FROM cards WHERE set_name = card_sets.name) as card_count
+        SELECT id, name, description, release_date 
         FROM card_sets 
         ORDER BY id
     ''')
     
+    # Mapeo de nombres a códigos
+    set_code_mapping = {
+        "Core Set": "core",
+        "The Green Goblin": "gob", 
+        "Captain America": "cap",
+        "Ms. Marvel": "msm",
+        "Thor": "thor",
+        "The Wrecking Crew": "twc",
+        "Black Widow": "bkw",
+        "Doctor Strange": "drs",
+        "Hulk": "hlk",
+        "Ronan Modular Set": "ron",
+        "The Rise of Red Skull": "trors",
+        "The Once and Future Kang": "toafk",
+        "Ant-Man": "ant",
+        "Wasp": "wsp",
+        "Quicksilver": "qsv",
+        "Scarlet Witch": "scw",
+        "The Galaxy's Most Wanted": "gmw",
+        "Star-Lord": "stld",
+        "Gamora": "gam",
+        "Drax": "drax",
+        "Venom": "vnm",
+        "The Mad Titan's Shadow": "mts",
+        "Nebula": "nebu",
+        "War Machine": "warm",
+        "The Hood": "hood",
+        "Valkyrie": "valk",
+        "Vision": "vision",
+        "Sinister Motives": "sm",
+        "Nova": "nova",
+        "Ironheart": "ironheart",
+        "Spider-Ham": "spiderham",
+        "SP//dr": "spdr",
+        "Mutant Genesis": "mut_gen",
+        "Cyclops": "cyclops",
+        "Phoenix": "phoenix",
+        "Wolverine": "wolv",
+        "Storm": "storm",
+        "Mojo Mania": "mm",
+        "Gambit": "gambit",
+        "Rogue": "rogue",
+        "NeXt Evolution": "next_evol",
+        "Psylocke": "psylocke",
+        "Angel": "angel",
+        "X-23": "x23",
+        "Deadpool": "deadpool",
+        "Age of Apocalypse": "aoa",
+        "Iceman": "iceman",
+        "Jubilee": "jubilee",
+        "Nightcrawler": "ncrawler",
+        "Magneto": "magneto",
+        "Agents of S.H.I.E.L.D.": "aos",
+        "Black Panther": "bp",
+        "Silk": "silk",
+        "Falcon": "falcon",
+        "Winter Soldier": "winter"
+    }
+    
     sets = []
     for row in cursor.fetchall():
+        set_name = row["name"]
+        set_code = set_code_mapping.get(set_name, set_name.lower().replace(" ", "_"))
+        
+        # Contar cartas reales
+        cursor.execute('SELECT COUNT(*) FROM cards WHERE set_name = ?', (set_code,))
+        real_card_count = cursor.fetchone()[0]
+        
         sets.append({
             "id": row["id"],
             "name": row["name"],
-            "cardCount": row["card_count"]
+            "description": row["description"],
+            "releaseDate": row["release_date"],
+            "cardCount": real_card_count
         })
     
     conn.close()
@@ -74,13 +132,74 @@ async def get_cards_by_set(set_id: int):
     
     set_name = set_row["name"]
     
-    # Obtener las cartas del set
+    # Mapear nombres de sets a códigos
+    set_code_mapping = {
+        "Core Set": "core",
+        "The Green Goblin": "gob", 
+        "Captain America": "cap",
+        "Ms. Marvel": "msm",
+        "Thor": "thor",
+        "The Wrecking Crew": "twc",
+        "Black Widow": "bkw",
+        "Doctor Strange": "drs",
+        "Hulk": "hlk",
+        "Ronan Modular Set": "ron",
+        "The Rise of Red Skull": "trors",
+        "The Once and Future Kang": "toafk",
+        "Ant-Man": "ant",
+        "Wasp": "wsp",
+        "Quicksilver": "qsv",
+        "Scarlet Witch": "scw",
+        "The Galaxy's Most Wanted": "gmw",
+        "Star-Lord": "stld",
+        "Gamora": "gam",
+        "Drax": "drax",
+        "Venom": "vnm",
+        "The Mad Titan's Shadow": "mts",
+        "Nebula": "nebu",
+        "War Machine": "warm",
+        "The Hood": "hood",
+        "Valkyrie": "valk",
+        "Vision": "vision",
+        "Sinister Motives": "sm",
+        "Nova": "nova",
+        "Ironheart": "ironheart",
+        "Spider-Ham": "spiderham",
+        "SP//dr": "spdr",
+        "Mutant Genesis": "mut_gen",
+        "Cyclops": "cyclops",
+        "Phoenix": "phoenix",
+        "Wolverine": "wolv",
+        "Storm": "storm",
+        "Mojo Mania": "mm",
+        "Gambit": "gambit",
+        "Rogue": "rogue",
+        "NeXt Evolution": "next_evol",
+        "Psylocke": "psylocke",
+        "Angel": "angel",
+        "X-23": "x23",
+        "Deadpool": "deadpool",
+        "Age of Apocalypse": "aoa",
+        "Iceman": "iceman",
+        "Jubilee": "jubilee",
+        "Nightcrawler": "ncrawler",
+        "Magneto": "magneto",
+        "Agents of S.H.I.E.L.D.": "aos",
+        "Black Panther": "bp",
+        "Silk": "silk",
+        "Falcon": "falcon",
+        "Winter Soldier": "winter"
+    }
+    
+    set_code = set_code_mapping.get(set_name, set_name.lower().replace(" ", "_"))
+    
+    # Obtener las cartas del set usando el código
     cursor.execute('''
         SELECT id, name, aspect, type, cost
         FROM cards 
         WHERE set_name = ?
         ORDER BY type, cost, name
-    ''', (set_name,))
+    ''', (set_code,))
     
     cards = []
     for row in cursor.fetchall():
@@ -184,8 +303,5 @@ async def search_cards(
     return {"cards": cards}
 
 if __name__ == "__main__":
-    # Inicializar base de datos si es necesario
-    initialize_database()
-    
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
