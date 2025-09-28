@@ -81,13 +81,12 @@ def import_sets(sets_data: List[Dict[str, Any]]):
                 set_id = abs(hash(set_data.get('code', ''))) % 1000000
             
             cursor.execute('''
-                INSERT INTO card_sets (id, name, description, release_date, card_count)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO card_sets (id, name, code, card_count)
+                VALUES (?, ?, ?, ?)
             ''', (
                 set_id,  # ID único de MarvelCDB
                 set_data.get('name', ''),  # name
-                f"Set {set_data.get('name', '')}",  # description (no existe en API)
-                set_data.get('available', ''),  # available como release_date
+                set_data.get('code', ''),  # code
                 set_data.get('total', 0)  # total como card_count
             ))
             imported_count += 1

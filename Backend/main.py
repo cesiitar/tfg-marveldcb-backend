@@ -32,86 +32,26 @@ async def get_sets():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, name, description, release_date 
+        SELECT id, name, code, card_count 
         FROM card_sets 
         ORDER BY id
     ''')
     
-    # Mapeo de nombres a códigos
-    set_code_mapping = {
-        "Core Set": "core",
-        "The Green Goblin": "gob", 
-        "Captain America": "cap",
-        "Ms. Marvel": "msm",
-        "Thor": "thor",
-        "The Wrecking Crew": "twc",
-        "Black Widow": "bkw",
-        "Doctor Strange": "drs",
-        "Hulk": "hlk",
-        "Ronan Modular Set": "ron",
-        "The Rise of Red Skull": "trors",
-        "The Once and Future Kang": "toafk",
-        "Ant-Man": "ant",
-        "Wasp": "wsp",
-        "Quicksilver": "qsv",
-        "Scarlet Witch": "scw",
-        "The Galaxy's Most Wanted": "gmw",
-        "Star-Lord": "stld",
-        "Gamora": "gam",
-        "Drax": "drax",
-        "Venom": "vnm",
-        "The Mad Titan's Shadow": "mts",
-        "Nebula": "nebu",
-        "War Machine": "warm",
-        "The Hood": "hood",
-        "Valkyrie": "valk",
-        "Vision": "vision",
-        "Sinister Motives": "sm",
-        "Nova": "nova",
-        "Ironheart": "ironheart",
-        "Spider-Ham": "spiderham",
-        "SP//dr": "spdr",
-        "Mutant Genesis": "mut_gen",
-        "Cyclops": "cyclops",
-        "Phoenix": "phoenix",
-        "Wolverine": "wolv",
-        "Storm": "storm",
-        "Mojo Mania": "mm",
-        "Gambit": "gambit",
-        "Rogue": "rogue",
-        "NeXt Evolution": "next_evol",
-        "Psylocke": "psylocke",
-        "Angel": "angel",
-        "X-23": "x23",
-        "Deadpool": "deadpool",
-        "Age of Apocalypse": "aoa",
-        "Iceman": "iceman",
-        "Jubilee": "jubilee",
-        "Nightcrawler": "ncrawler",
-        "Magneto": "magneto",
-        "Agents of S.H.I.E.L.D.": "aos",
-        "Black Panther": "bp",
-        "Silk": "silk",
-        "Falcon": "falcon",
-        "Winter Soldier": "winter"
-    }
-    
     sets = []
     for row in cursor.fetchall():
         set_name = row["name"]
-        set_code = set_code_mapping.get(set_name, set_name.lower().replace(" ", "_"))
         
-        # Contar cartas reales
-        cursor.execute('SELECT COUNT(*) FROM cards WHERE set_name = ?', (set_code,))
+        # Contar cartas reales usando el código del set
+        cursor.execute('SELECT COUNT(*) FROM cards WHERE set_name = ?', (row["code"],))
         real_card_count = cursor.fetchone()[0]
         
-        sets.append({
-            "id": row["id"],
-            "name": row["name"],
-            "description": row["description"],
-            "releaseDate": row["release_date"],
-            "cardCount": real_card_count
-        })
+        # Solo incluir sets que tengan cartas
+        if real_card_count > 0:
+            sets.append({
+                "id": row["id"],
+                "name": row["name"],
+                "cardCount": real_card_count
+            })
     
     conn.close()
     return {"sets": sets}
@@ -132,66 +72,15 @@ async def get_cards_by_set(set_id: int):
     
     set_name = set_row["name"]
     
-    # Mapear nombres de sets a códigos
-    set_code_mapping = {
-        "Core Set": "core",
-        "The Green Goblin": "gob", 
-        "Captain America": "cap",
-        "Ms. Marvel": "msm",
-        "Thor": "thor",
-        "The Wrecking Crew": "twc",
-        "Black Widow": "bkw",
-        "Doctor Strange": "drs",
-        "Hulk": "hlk",
-        "Ronan Modular Set": "ron",
-        "The Rise of Red Skull": "trors",
-        "The Once and Future Kang": "toafk",
-        "Ant-Man": "ant",
-        "Wasp": "wsp",
-        "Quicksilver": "qsv",
-        "Scarlet Witch": "scw",
-        "The Galaxy's Most Wanted": "gmw",
-        "Star-Lord": "stld",
-        "Gamora": "gam",
-        "Drax": "drax",
-        "Venom": "vnm",
-        "The Mad Titan's Shadow": "mts",
-        "Nebula": "nebu",
-        "War Machine": "warm",
-        "The Hood": "hood",
-        "Valkyrie": "valk",
-        "Vision": "vision",
-        "Sinister Motives": "sm",
-        "Nova": "nova",
-        "Ironheart": "ironheart",
-        "Spider-Ham": "spiderham",
-        "SP//dr": "spdr",
-        "Mutant Genesis": "mut_gen",
-        "Cyclops": "cyclops",
-        "Phoenix": "phoenix",
-        "Wolverine": "wolv",
-        "Storm": "storm",
-        "Mojo Mania": "mm",
-        "Gambit": "gambit",
-        "Rogue": "rogue",
-        "NeXt Evolution": "next_evol",
-        "Psylocke": "psylocke",
-        "Angel": "angel",
-        "X-23": "x23",
-        "Deadpool": "deadpool",
-        "Age of Apocalypse": "aoa",
-        "Iceman": "iceman",
-        "Jubilee": "jubilee",
-        "Nightcrawler": "ncrawler",
-        "Magneto": "magneto",
-        "Agents of S.H.I.E.L.D.": "aos",
-        "Black Panther": "bp",
-        "Silk": "silk",
-        "Falcon": "falcon",
-        "Winter Soldier": "winter"
-    }
+    # Obtener el código del set
+    cursor.execute('SELECT code FROM card_sets WHERE id = ?', (set_id,))
+    set_code_row = cursor.fetchone()
     
-    set_code = set_code_mapping.get(set_name, set_name.lower().replace(" ", "_"))
+    if not set_code_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Código del set no encontrado")
+    
+    set_code = set_code_row["code"]
     
     # Obtener las cartas del set usando el código
     cursor.execute('''
