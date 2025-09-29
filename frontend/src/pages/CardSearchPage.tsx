@@ -82,62 +82,87 @@ const CardSearchPage: React.FC = () => {
         </p>
       </div>
 
-      <div className="max-w-4xl mx-auto">
-        {/* Main Search Form */}
-          <div className="bg-white rounded-xl p-8 shadow-lg">
-            <form onSubmit={handleSearch} className="space-y-8">
-              {/* Name */}
-              <div>
-                <h3 className="text-lg font-semibold text-secondary-800 mb-4">Nombre</h3>
-                <div>
-                  <label className="block text-sm font-medium text-secondary-700 mb-2">
-                    Nombre de la carta
+      {/* Main Search Form */}
+      <div className="bg-white rounded-xl p-8 shadow-lg border border-gray-100">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+              <svg className="w-7 h-7 mr-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              Filtros de Búsqueda
+            </h2>
+            <p className="text-gray-600 mt-2">Encuentra las cartas perfectas para tu mazo</p>
+          </div>
+          
+          <form onSubmit={handleSearch} className="space-y-8">
+            {/* Name */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                Nombre de la Carta
+              </h3>
+              <div className="relative">
+                <input
+                  type="text"
+                  name="name"
+                  value={searchForm.name}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 pl-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Escribe el nombre de la carta..."
+                />
+                <svg className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Aspect */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                Clase de la Carta
+              </h3>
+              <div className="flex flex-wrap gap-3">
+                {['aggression', 'justice', 'leadership', 'protection'].map((aspect) => (
+                  <button
+                    key={aspect}
+                    type="button"
+                    onClick={() => setSearchForm(prev => ({ ...prev, aspect: prev.aspect === aspect ? '' : aspect }))}
+                    className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 capitalize ${
+                      searchForm.aspect === aspect
+                        ? 'bg-blue-600 text-white shadow-lg transform scale-105'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:shadow-md'
+                    }`}
+                  >
+                    {aspect}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Type and Cost */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                Tipo y Coste
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    Tipo de Carta
                   </label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={searchForm.name}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                    placeholder="Buscar por nombre..."
-                  />
-                </div>
-              </div>
-
-              {/* Aspect */}
-              <div>
-                <h3 className="text-lg font-semibold text-secondary-800 mb-4">Aspecto</h3>
-                <div className="flex flex-wrap gap-2">
-                  {['aggression', 'justice', 'leadership', 'protection'].map((aspect) => (
-                    <button
-                      key={aspect}
-                      type="button"
-                      onClick={() => setSearchForm(prev => ({ ...prev, aspect: prev.aspect === aspect ? '' : aspect }))}
-                      className={`px-4 py-2 rounded-lg font-medium transition-colors duration-200 capitalize ${
-                        searchForm.aspect === aspect
-                          ? 'bg-accent-500 text-white'
-                          : 'bg-secondary-100 text-secondary-700 hover:bg-secondary-200'
-                      }`}
-                    >
-                      {aspect}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Type and Cost */}
-              <div>
-                <h3 className="text-lg font-semibold text-secondary-800 mb-4">Tipo y Coste</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-secondary-700 mb-2">
-                      Tipo
-                    </label>
+                  <div className="relative">
                     <select
                       name="type"
                       value={searchForm.type}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                      className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
                     >
                       <option value="">Cualquiera</option>
                       <option value="hero">Héroe</option>
@@ -146,37 +171,47 @@ const CardSearchPage: React.FC = () => {
                       <option value="upgrade">Mejora</option>
                       <option value="support">Apoyo</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-secondary-700 mb-2">
-                      Coste
-                    </label>
-                    <input
-                      type="number"
-                      name="cost"
-                      value={searchForm.cost}
-                      onChange={handleInputChange}
-                      min="0"
-                      max="10"
-                      className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                      placeholder="Coste..."
-                    />
+                    <svg className="absolute right-3 top-3.5 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
                   </div>
                 </div>
-              </div>
-
-              {/* Set */}
-              <div>
-                <h3 className="text-lg font-semibold text-secondary-800 mb-4">Set</h3>
-                <div>
-                  <label className="block text-sm font-medium text-secondary-700 mb-2">
-                    Seleccionar Set
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    Coste de la Carta
                   </label>
+                  <input
+                    type="number"
+                    name="cost"
+                    value={searchForm.cost}
+                    onChange={handleInputChange}
+                    min="0"
+                    max="10"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Ej: 3"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Set */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                Set de Cartas
+              </h3>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">
+                  Seleccionar Set
+                </label>
+                <div className="relative">
                   <select
                     name="set_name"
                     value={searchForm.set_name}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                    className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
                   >
                     <option value="">Cualquiera</option>
                     {sets.map((set) => (
@@ -185,35 +220,66 @@ const CardSearchPage: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  <svg className="absolute right-3 top-3.5 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
               </div>
+            </div>
 
-              {/* Submit */}
-              <div className="flex justify-between items-center pt-6 border-t border-secondary-200">
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  className="px-6 py-2 text-secondary-600 border border-secondary-300 rounded-lg hover:bg-secondary-50 transition-colors duration-200"
-                >
-                  Limpiar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="px-8 py-3 bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors duration-200 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? 'Buscando...' : 'Buscar Cartas'}
-                </button>
-              </div>
+            {/* Submit */}
+            <div className="flex justify-between items-center pt-8 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="px-8 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200 font-semibold flex items-center"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Limpiar Filtros
+              </button>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="px-10 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center"
+              >
+                {isLoading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Buscando...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Buscar Cartas
+                  </>
+                )}
+              </button>
+            </div>
             </form>
-          </div>
       </div>
 
       {/* Results Section */}
-      <div className="bg-white rounded-xl p-8 shadow-lg">
-        <h3 className="text-lg font-semibold text-secondary-800 mb-4">
-          Resultados {hasSearched && `(${searchResults.length} cartas encontradas)`}
-        </h3>
+      <div className="bg-white rounded-xl p-8 shadow-lg border border-gray-100">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-bold text-gray-800 flex items-center">
+            <svg className="w-7 h-7 mr-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Resultados de la Búsqueda
+          </h3>
+          {hasSearched && (
+            <span className="bg-green-100 text-green-800 text-sm font-medium px-4 py-2 rounded-full">
+              {searchResults.length} cartas encontradas
+            </span>
+          )}
+        </div>
         
         {isLoading ? (
           <div className="text-center py-16">
@@ -258,30 +324,33 @@ const CardSearchPage: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {searchResults.map((card) => (
-              <div key={card.id} className="border border-secondary-200 rounded-lg p-4 hover:shadow-md transition-shadow duration-200">
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="font-semibold text-secondary-800 text-lg">{card.name}</h4>
-                  <span className="text-sm text-secondary-500">#{card.id}</span>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {searchResults.map((card, index) => (
+              <div key={index} className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-blue-300 transition-all duration-300 hover:-translate-y-1">
+                <h4 className="font-bold text-lg text-gray-900 mb-3 line-clamp-2">{card.name}</h4>
                 
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-secondary-600">Aspecto:</span>
-                    <span className="font-medium capitalize text-accent-600">{card.aspect}</span>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm">Clase:</span>
+                    <span className="font-semibold capitalize text-blue-600 bg-blue-50 px-2 py-1 rounded-full text-xs">
+                      {card.clase}
+                    </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-secondary-600">Tipo:</span>
-                    <span className="font-medium capitalize">{card.type}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm">Tipo:</span>
+                    <span className="font-medium capitalize text-gray-800">{card.type}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-secondary-600">Coste:</span>
-                    <span className="font-medium">{card.cost}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm">Coste:</span>
+                    <span className="font-bold text-lg text-green-600 bg-green-50 px-2 py-1 rounded-full">
+                      {card.cost}
+                    </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-secondary-600">Set:</span>
-                    <span className="font-medium text-sm">{card.set}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm">Set:</span>
+                    <span className="font-medium text-sm text-purple-600 bg-purple-50 px-2 py-1 rounded-full">
+                      {card.set}
+                    </span>
                   </div>
                 </div>
               </div>

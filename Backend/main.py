@@ -57,7 +57,11 @@ async def get_sets():
     return {"sets": sets}
 
 @app.get("/api/sets/{set_id}/cards")
-async def get_cards_by_set(set_id: int):
+async def get_cards_by_set(
+    set_id: int,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = None
+):
     """Obtener todas las cartas de un set específico"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -82,20 +86,41 @@ async def get_cards_by_set(set_id: int):
     
     set_code = set_code_row["code"]
     
-    # Obtener las cartas del set usando el código
-    cursor.execute('''
-        SELECT id, name, aspect, type, cost
+    # Construir query con filtros y ordenamiento
+    query = '''
+        SELECT name, aspect, type, cost
         FROM cards 
         WHERE set_name = ?
-        ORDER BY type, cost, name
-    ''', (set_code,))
+    '''
+    params = [set_code]
+    
+    # Añadir filtro de búsqueda si se proporciona
+    if search:
+        query += ' AND name LIKE ?'
+        params.append(f'%{search}%')
+    
+    # Añadir ordenamiento
+    if sort_by == 'clase':
+        query += ' ORDER BY aspect, type, cost, name'
+    elif sort_by == 'nombre':
+        # Ordenar por nombre pero manteniendo agrupación por clase
+        query += ' ORDER BY aspect, name'
+    elif sort_by == 'fuerza':
+        query += ' ORDER BY cost DESC, name'
+    elif sort_by == 'tipo':
+        # Ordenamiento especial para héroes: primero héroes, luego por cost
+        query += ' ORDER BY CASE WHEN type = "hero" THEN 0 ELSE 1 END, type, cost, name'
+    else:
+        # Ordenamiento por defecto: héroes primero, luego por tipo
+        query += ' ORDER BY CASE WHEN type = "hero" THEN 0 ELSE 1 END, type, cost, name'
+    
+    cursor.execute(query, params)
     
     cards = []
     for row in cursor.fetchall():
         card = {
-            "id": row["id"],
             "name": row["name"],
-            "aspect": row["aspect"],
+            "clase": row["aspect"],
             "type": row["type"],
             "cost": row["cost"],
             "set": set_name

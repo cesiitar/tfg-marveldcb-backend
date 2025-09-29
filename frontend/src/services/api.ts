@@ -17,9 +17,19 @@ class ApiService {
     }
   }
 
-  async getCardsBySet(setId: number): Promise<{ set: string; cards: Card[] }> {
+  async getCardsBySet(
+    setId: number, 
+    search?: string, 
+    sortBy?: string
+  ): Promise<{ set: string; cards: Card[] }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/sets/${setId}/cards`)
+      const params = new URLSearchParams()
+      if (search) params.append('search', search)
+      if (sortBy) params.append('sort_by', sortBy)
+      
+      const url = `${API_BASE_URL}/sets/${setId}/cards${params.toString() ? '?' + params.toString() : ''}`
+      const response = await fetch(url)
+      
       if (!response.ok) {
         throw new Error('Error al obtener las cartas del set')
       }

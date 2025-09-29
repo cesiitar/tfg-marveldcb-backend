@@ -127,13 +127,9 @@ const CardsPage: React.FC = () => {
               </div>
             </div>
             
-            <p className="text-sm text-secondary-700 mb-3 line-clamp-2">
-              {set.description}
-            </p>
-
             <div className="flex justify-between items-center">
               <span className="text-xs text-secondary-500">
-                {set.releaseDate}
+                Ver cartas
               </span>
               <svg className="w-4 h-4 text-secondary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

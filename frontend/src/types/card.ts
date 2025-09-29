@@ -1,7 +1,6 @@
 export interface Card {
-  id: number
   name: string
-  aspect: 'aggression' | 'justice' | 'leadership' | 'protection'
+  clase: 'aggression' | 'justice' | 'leadership' | 'protection'
   type: 'hero' | 'ally' | 'event' | 'upgrade' | 'support'
   cost: number
   set: string
@@ -10,7 +9,5 @@ export interface Card {
 export interface CardSet {
   id: number
   name: string
-  description: string
-  releaseDate: string
   cardCount: number
 }
