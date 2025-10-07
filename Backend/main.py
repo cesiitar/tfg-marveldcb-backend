@@ -6,10 +6,16 @@ from typing import List, Dict, Optional
 
 app = FastAPI(title="MarvelCDB API", version="1.0.0")
 
-# Configurar CORS para permitir requests desde el frontend
+# Configurar CORS para permitir requests desde el frontend separado
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:3000",  # Frontend local
+        "http://localhost:5173",  # Vite dev server
+        "https://cesiitar.github.io",  # GitHub Pages (si planeas usar GitHub Pages)
+        "https://tfg-marveldcb-frontend.vercel.app",  # Vercel (ejemplo)
+        "https://tfg-marveldcb-frontend.netlify.app"   # Netlify (ejemplo)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,7 +48,7 @@ async def get_sets():
         set_name = row["name"]
         
         # Contar cartas reales usando el código del set
-        cursor.execute('SELECT COUNT(*) FROM cards WHERE set_name = ?', (row["code"],))
+        cursor.execute('SELECT COUNT(*) FROM cards WHERE set_code = ?', (row["code"],))
         real_card_count = cursor.fetchone()[0]
         
         # Solo incluir sets que tengan cartas
@@ -88,9 +94,9 @@ async def get_cards_by_set(
     
     # Construir query con filtros y ordenamiento
     query = '''
-        SELECT name, aspect, type, cost
+        SELECT name, aspect, type, cost, set_name
         FROM cards 
-        WHERE set_name = ?
+        WHERE set_code = ?
     '''
     params = [set_code]
     
@@ -123,7 +129,7 @@ async def get_cards_by_set(
             "clase": row["aspect"],
             "type": row["type"],
             "cost": row["cost"],
-            "set": set_name
+            "set": row["set_name"]  # Usar el nombre completo del set
         }
         cards.append(card)
     
@@ -147,10 +153,10 @@ async def get_all_cards():
         card = {
             "id": row["id"],
             "name": row["name"],
-            "aspect": row["aspect"],
+            "clase": row["aspect"],
             "type": row["type"],
             "cost": row["cost"],
-            "set": row["set_name"]
+            "set": row["set_name"]  # Ahora contiene el nombre completo
         }
         cards.append(card)
     
@@ -206,10 +212,10 @@ async def search_cards(
         card = {
             "id": row["id"],
             "name": row["name"],
-            "aspect": row["aspect"],
+            "clase": row["aspect"],
             "type": row["type"],
             "cost": row["cost"],
-            "set": row["set_name"]
+            "set": row["set_name"]  # Ahora contiene el nombre completo
         }
         cards.append(card)
     

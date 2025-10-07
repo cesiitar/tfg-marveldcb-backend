@@ -1,26 +1,25 @@
-# MarvelCDB - Marvel Champions Database
+# MarvelCDB Backend - Marvel Champions Database API
 
-Una aplicación web para gestionar y explorar cartas del juego Marvel Champions.
+Backend API para gestionar y explorar cartas del juego Marvel Champions.
 
 ## 🚀 Características
 
-- **Búsqueda de cartas** con filtros avanzados
-- **Gestión de sets** de cartas
 - **API REST** con FastAPI
-- **Interfaz moderna** con React + TypeScript
 - **Base de datos SQLite** para almacenamiento local
+- **Endpoints** para búsqueda de cartas con filtros avanzados
+- **Gestión de sets** de cartas
+- **CORS configurado** para frontend separado
 
 ## 📋 Requisitos
 
-- **Node.js** 16+ 
 - **Python** 3.8+
-- **npm** o **yarn**
+- **pip** (gestor de paquetes Python)
 
 ## 🛠️ Instalación y Configuración
 
 ### 1. Clonar el repositorio
 ```bash
-git clone <tu-repo-url>
+git clone https://github.com/cesiitar/tfg-marveldcb.git
 cd tfg-marveldcb
 ```
 
@@ -32,30 +31,18 @@ cd Backend
 # Instalar dependencias Python
 py -m pip install -r requirements.txt
 
-# Inicializar base de datos
-py setup_database.py
+# Importar cartas de Marvel Champions (opcional)
+py import_marvel_cards.py
 
 # Ejecutar servidor (puerto 8000)
 py main.py
 ```
 
-### 3. Configurar Frontend (React)
-
-```bash
-cd frontend
-
-# Instalar dependencias Node.js
-npm install
-
-# Ejecutar servidor de desarrollo
-npm run dev
-```
-
 ## 🌐 URLs
 
-- **Frontend**: http://localhost:3000 (o 3001 si 3000 está ocupado)
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
+- **Frontend**: https://github.com/cesiitar/tfg-marveldcb-frontend
 
 ## 📁 Estructura del Proyecto
 
@@ -63,17 +50,9 @@ npm run dev
 tfg-marveldcb/
 ├── Backend/
 │   ├── main.py              # API FastAPI
-│   ├── setup_database.py    # Configuración de BD
+│   ├── import_marvel_cards.py # Script para importar cartas
 │   ├── requirements.txt     # Dependencias Python
 │   └── marvel_cards.db      # Base de datos SQLite
-├── frontend/
-│   ├── src/
-│   │   ├── pages/           # Páginas React
-│   │   ├── components/      # Componentes reutilizables
-│   │   ├── services/        # Servicios API
-│   │   └── types/           # Tipos TypeScript
-│   ├── package.json         # Dependencias Node.js
-│   └── vite.config.ts       # Configuración Vite
 └── README.md
 ```
 
@@ -87,53 +66,45 @@ py main.py
 # Con recarga automática
 py -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# Recrear base de datos
-py setup_database.py
+# Importar cartas de Marvel Champions
+py import_marvel_cards.py
 ```
 
-### Frontend
-```bash
-# Desarrollo
-npm run dev
+## 🎯 Endpoints de la API
 
-# Build para producción
-npm run build
+### Sets
+- `GET /api/sets` - Obtener todos los sets de cartas
+- `GET /api/sets/{set_id}/cards` - Obtener cartas de un set específico
 
-# Preview build
-npm run preview
-```
+### Cartas
+- `GET /api/cards` - Obtener todas las cartas
+- `GET /api/cards/search` - Buscar cartas con filtros
 
-## 🎯 Funcionalidades
+### Parámetros de búsqueda
+- `name` - Nombre de la carta
+- `aspect` - Aspecto/clase de la carta
+- `type` - Tipo de carta (hero, ally, event, etc.)
+- `cost` - Coste de la carta
+- `set_name` - Nombre del set
 
-### ✅ Implementadas
-- [x] API REST con FastAPI
-- [x] Base de datos SQLite con cartas de prueba
-- [x] Búsqueda de cartas con filtros
-- [x] Interfaz de usuario moderna
-- [x] Navegación entre páginas
+## 🔧 Configuración CORS
 
-### 🚧 En desarrollo
-- [ ] Gestión de mazos
-- [ ] Sistema de usuarios
-- [ ] Más cartas en la base de datos
+El backend está configurado para aceptar requests desde:
+- `http://localhost:3000` (Frontend local)
+- `http://localhost:5173` (Vite dev server)
+- `https://cesiitar.github.io` (GitHub Pages)
+- Otros dominios de despliegue comunes
 
 ## 🐛 Solución de Problemas
 
-### Puerto 3000 ocupado
-Si el frontend usa el puerto 3001:
+### Puerto 8000 ocupado
 ```bash
-# Verificar qué usa el puerto 3000
-netstat -ano | findstr :3000
+# Verificar qué usa el puerto 8000
+netstat -ano | findstr :8000
 
-# Forzar puerto específico
-npm run dev -- --port 3000
+# Usar otro puerto
+py -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
-
-### Caché del navegador
-Si no ves cambios:
-- Refresco fuerte: `Ctrl + Shift + R`
-- Modo incógnito
-- Limpiar caché del navegador
 
 ### Dependencias Python
 Si hay problemas con pip:
@@ -142,12 +113,22 @@ py -m ensurepip --upgrade
 py -m pip install --upgrade pip
 ```
 
+### Base de datos
+Si necesitas recrear la base de datos:
+```bash
+# Eliminar base de datos existente
+rm marvel_cards.db
+
+# Ejecutar script de importación
+py import_marvel_cards.py
+```
+
 ## 📝 Notas de Desarrollo
 
-- El backend se ejecuta en puerto 8000
-- El frontend se ejecuta en puerto 3000 (o 3001 si está ocupado)
+- El backend se ejecuta en puerto 8000 por defecto
 - La base de datos se crea automáticamente si no existe
-- Los cambios en el código se reflejan automáticamente (hot reload)
+- Los cambios en el código se reflejan automáticamente con `--reload`
+- CORS está configurado para el frontend separado
 
 ## 🤝 Contribuir
 
@@ -156,3 +137,8 @@ py -m pip install --upgrade pip
 3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
 4. Push a la rama (`git push origin feature/AmazingFeature`)
 5. Abre un Pull Request
+
+## 🔗 Enlaces Relacionados
+
+- **Frontend**: https://github.com/cesiitar/tfg-marveldcb-frontend
+- **Documentación API**: http://localhost:8000/docs (cuando el servidor esté ejecutándose)

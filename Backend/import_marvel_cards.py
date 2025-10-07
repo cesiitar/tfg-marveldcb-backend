@@ -124,16 +124,26 @@ def import_cards(cards_data: List[Dict[str, Any]]):
                 # Si no es numérico, usar hash del string
                 card_id = abs(hash(card_id)) % 1000000
             
+            # Obtener faction_code y type_code correctamente
+            faction_code = card_data.get('faction_code', '')
+            type_code = card_data.get('type_code', '')
+            
+            # Validar que tenemos los datos necesarios
+            if not faction_code or not type_code:
+                print(f"⚠️ Saltando carta {card_data.get('name', 'Unknown')}: datos incompletos")
+                continue
+            
             cursor.execute('''
-                INSERT INTO cards (id, name, aspect, type, cost, set_name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cards (id, name, aspect, type, cost, set_name, set_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 card_id,
                 card_data.get('name', ''),
-                card_data.get('faction_code', ''),  # aspect
-                card_data.get('type_code', ''),     # type
+                faction_code,  # aspect (clase de la carta)
+                type_code,     # type (tipo de carta)
                 cost,
-                card_data.get('pack_code', '')      # set_name
+                card_data.get('pack_name', ''),     # set_name (nombre completo)
+                card_data.get('pack_code', '')      # set_code (código)
             ))
             imported_count += 1
             
