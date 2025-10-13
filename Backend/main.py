@@ -112,6 +112,25 @@ def ensure_decks_columns():
         conn.commit()
     conn.close()
 
+# =============================================================================
+# UTILIDADES DE ESQUEMA (cards)
+# =============================================================================
+def ensure_cards_columns():
+    """Garantiza que la tabla cards tenga columnas requeridas (p. ej., deck_limit)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(cards)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    altered = False
+    if 'deck_limit' not in columns:
+        cursor.execute('ALTER TABLE cards ADD COLUMN deck_limit INTEGER')
+        altered = True
+
+    if altered:
+        conn.commit()
+    conn.close()
+
 @app.get("/")
 async def root():
     return {"message": "MarvelCDB API está funcionando!"}
@@ -315,16 +334,19 @@ async def get_heroes():
 @app.get("/api/heroes/{hero_name}/cards")
 async def get_hero_cards(hero_name: str):
     """Obtener las cartas específicas del héroe (excluyendo la carta del héroe)"""
+    ensure_cards_columns()
     conn = get_db_connection()
     cursor = conn.cursor()
     
     # Buscar las cartas que pertenecen al set del héroe específico
     # EXCLUIR la carta del héroe (type = 'hero') y solo incluir cartas del aspecto 'hero'
     cursor.execute('''
-        SELECT name, cost, type, aspect, card_set, quantity
+        SELECT name, cost, type, aspect, card_set, quantity, deck_limit
         FROM cards 
         WHERE card_set = ? 
         AND type != 'hero' 
+        AND LOWER(type) != 'alter_ego' 
+        AND LOWER(type) != 'alter-ego'
         AND aspect = 'hero'
         ORDER BY type, cost, name
     ''', (hero_name,))
@@ -337,7 +359,8 @@ async def get_hero_cards(hero_name: str):
             "type": row["type"],
             "clase": row["aspect"],
             "set": row["card_set"],
-            "quantity": row["quantity"]  # ← IMPORTANTE: cantidad de la carta
+            "quantity": row["quantity"],  # ← IMPORTANTE: cantidad de la carta
+            "max_quantity": (row["deck_limit"] if row["deck_limit"] is not None else 3)
         })
     
     conn.close()
@@ -351,7 +374,7 @@ async def get_cards_by_aspect(aspect: str):
     
     # Buscar cartas del aspecto especificado
     cursor.execute('''
-        SELECT name, cost, type, aspect, pack_name, quantity
+        SELECT name, cost, type, aspect, pack_name, quantity, deck_limit
         FROM cards 
         WHERE aspect = ?
         ORDER BY type, cost, name
@@ -365,7 +388,8 @@ async def get_cards_by_aspect(aspect: str):
             "type": row["type"],
             "clase": row["aspect"],
             "set": row["pack_name"],
-            "quantity": row["quantity"]
+            "quantity": row["quantity"],
+            "max_quantity": (row["deck_limit"] if row["deck_limit"] is not None else 3)
         })
     
     conn.close()
@@ -377,7 +401,7 @@ async def get_all_cards():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, name, aspect, type, cost, set_name
+        SELECT id, name, aspect, type, cost, set_name, deck_limit
         FROM cards 
         ORDER BY set_name, type, cost, name
     ''')
@@ -390,7 +414,8 @@ async def get_all_cards():
             "clase": row["aspect"],
             "type": row["type"],
             "cost": row["cost"],
-            "set": row["set_name"]  # Ahora contiene el nombre completo
+            "set": row["set_name"],  # Ahora contiene el nombre completo
+            "max_quantity": (row["deck_limit"] if row["deck_limit"] is not None else 3)
         }
         cards.append(card)
     
@@ -491,13 +516,25 @@ async def get_public_decks():
             raw_cards = json.loads(row["cards"]) if row["cards"] else []
         except json.JSONDecodeError:
             raw_cards = []
-        # Normalizar a formato { card_name, quantity }
+        # Normalizar a formato { card_name, quantity, type, clase }
         cards_data = []
         for c in raw_cards:
-            cards_data.append({
-                "card_name": c.get("card_name") or c.get("name") or c.get("code"),
+            card_name = c.get("card_name") or c.get("name") or c.get("code")
+            # Buscar información adicional de la carta en la tabla cards
+            cursor.execute('SELECT type, aspect, pack_name FROM cards WHERE name = ?', (card_name,))
+            card_info = cursor.fetchone()
+            
+            card_data = {
+                "card_name": card_name,
                 "quantity": c.get("quantity", 1)
-            })
+            }
+            
+            if card_info:
+                card_data["type"] = card_info["type"]
+                card_data["clase"] = card_info["aspect"]
+                card_data["set"] = card_info["pack_name"] or "Unknown"
+            
+            cards_data.append(card_data)
         
         # Obtener nombre del creador si existe user_id
         creator_name = None
@@ -596,13 +633,27 @@ async def create_deck(deck_data: dict, request: Request):
         
         for card in cards:
             card_name = card.get('card_name', card.get('name', ''))
-            cursor.execute('SELECT name FROM cards WHERE name = ?', (card_name,))
-            if not cursor.fetchone():
+            cursor.execute('SELECT name, deck_limit FROM cards WHERE name = ?', (card_name,))
+            row = cursor.fetchone()
+            if not row:
                 conn.close()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Card '{card_name}' does not exist in database"
                 )
+            # Enforce deck_limit si existe
+            deck_limit = None
+            try:
+                deck_limit = row["deck_limit"]
+            except Exception:
+                deck_limit = None
+            if deck_limit is not None and isinstance(deck_limit, int):
+                if card.get('quantity', 1) > deck_limit:
+                    conn.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Card '{card_name}' exceeds deck limit ({deck_limit})"
+                    )
         
         # Reutilizar la conexión existente
         conn = get_db_connection()
@@ -683,9 +734,29 @@ async def get_deck(deck_id: int):
         raise HTTPException(status_code=404, detail="Mazo no encontrado")
     
     try:
-        cards_data = json.loads(row["cards"]) if row["cards"] else []
+        raw_cards = json.loads(row["cards"]) if row["cards"] else []
     except json.JSONDecodeError:
-        cards_data = []
+        raw_cards = []
+    
+    # Normalizar a formato { card_name, quantity, type, clase }
+    cards_data = []
+    for c in raw_cards:
+        card_name = c.get("card_name") or c.get("name") or c.get("code")
+        # Buscar información adicional de la carta en la tabla cards
+        cursor.execute('SELECT type, aspect, pack_name FROM cards WHERE name = ?', (card_name,))
+        card_info = cursor.fetchone()
+        
+        card_data = {
+            "card_name": card_name,
+            "quantity": c.get("quantity", 1)
+        }
+        
+        if card_info:
+            card_data["type"] = card_info["type"]
+            card_data["clase"] = card_info["aspect"]
+            card_data["set"] = card_info["pack_name"] or "Unknown"
+        
+        cards_data.append(card_data)
     
     # Obtener nombre del creador si existe user_id
     creator_name = None
@@ -844,13 +915,25 @@ async def get_user_decks(request: Request):
                 raw_cards = json.loads(row["cards"]) if row["cards"] else []
             except json.JSONDecodeError:
                 raw_cards = []
-            # Normalizar a formato { card_name, quantity }
+            # Normalizar a formato { card_name, quantity, type, clase }
             cards_data = []
             for c in raw_cards:
-                cards_data.append({
-                    "card_name": c.get("card_name") or c.get("name") or c.get("code"),
+                card_name = c.get("card_name") or c.get("name") or c.get("code")
+                # Buscar información adicional de la carta en la tabla cards
+                cursor.execute('SELECT type, aspect, pack_name FROM cards WHERE name = ?', (card_name,))
+                card_info = cursor.fetchone()
+                
+                card_data = {
+                    "card_name": card_name,
                     "quantity": c.get("quantity", 1)
-                })
+                }
+                
+                if card_info:
+                    card_data["type"] = card_info["type"]
+                    card_data["clase"] = card_info["aspect"]
+                    card_data["set"] = card_info["pack_name"] or "Unknown"
+                
+                cards_data.append(card_data)
             
             # Obtener nombre del creador (el propio usuario)
             creator_name = user.get("name")

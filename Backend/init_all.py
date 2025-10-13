@@ -35,7 +35,7 @@ def initialize_database():
         CREATE TABLE cards (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
-            aspect TEXT NOT NULL,
+            aspect TEXT NOT NULL,  --es la clase de la carta
             type TEXT NOT NULL,
             cost INTEGER DEFAULT 0,
             set_name TEXT,
@@ -45,7 +45,8 @@ def initialize_database():
             faction_code TEXT,   -- Código de facción
             type_code TEXT,      -- Código de tipo
             card_set TEXT,       -- Set de la carta (ej: "Ms. Marvel", "Spider-Man")
-            quantity INTEGER DEFAULT 1  -- Cantidad de la carta en el mazo
+            quantity INTEGER DEFAULT 1,  -- Cantidad de la carta en el mazo
+            deck_limit INTEGER           -- Límite de copias por mazo (NULL si no viene)
         )
     ''')
     
@@ -197,9 +198,9 @@ def import_cards(cards_data: List[Dict[str, Any]]):
             cursor.execute('''
                 INSERT INTO cards (
                     id, name, aspect, type, cost, set_name, set_code,
-                    pack_code, pack_name, faction_code, type_code, card_set, quantity
+                    pack_code, pack_name, faction_code, type_code, card_set, quantity, deck_limit
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 card_id,
                 card_data.get('name', ''),
@@ -213,7 +214,8 @@ def import_cards(cards_data: List[Dict[str, Any]]):
                 card_data.get('faction_code', ''),
                 card_data.get('type_code', ''),
                 card_data.get('card_set_name'),  # Set real de la API (puede ser NULL)
-                card_data.get('quantity', 1)     # Cantidad real de la API
+                card_data.get('quantity', 1),     # Cantidad real de la API
+                int(card_data.get('deck_limit')) if str(card_data.get('deck_limit', '')).isdigit() else None
             ))
             imported_count += 1
             
