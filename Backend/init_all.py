@@ -30,7 +30,7 @@ def initialize_database():
     conn = sqlite3.connect('marvel_cards.db')
     cursor = conn.cursor()
     
-    # Tabla cards con información completa
+    # Tabla cards con información completa (incluyendo encounter cards)
     cursor.execute('''
         CREATE TABLE cards (
             id INTEGER PRIMARY KEY,
@@ -46,7 +46,13 @@ def initialize_database():
             type_code TEXT,      -- Código de tipo
             card_set TEXT,       -- Set de la carta (ej: "Ms. Marvel", "Spider-Man")
             quantity INTEGER DEFAULT 1,  -- Cantidad de la carta en el mazo
-            deck_limit INTEGER           -- Límite de copias por mazo (NULL si no viene)
+            deck_limit INTEGER,          -- Límite de copias por mazo (NULL si no viene)
+            health INTEGER,              -- Salud para villanos/minions
+            attack INTEGER,              -- Ataque para villanos/minions
+            threat INTEGER,              -- Amenaza para schemes
+            traits TEXT,                 -- Traits de la carta
+            text TEXT,                   -- Texto de la carta
+            is_unique BOOLEAN DEFAULT 0   -- Si la carta es única
         )
     ''')
     
@@ -313,6 +319,124 @@ def import_decks(decks_data: List[Dict[str, Any]]):
     conn.close()
     print(f"✅ Importados {imported_count} mazos")
 
+def import_villains_and_encounters():
+    """Importar villanos y encounter cards a la tabla cards existente"""
+    
+    print("🔍 Importando villanos y encounter cards a la tabla cards...")
+    
+    # Conectar a la base de datos
+    conn = sqlite3.connect('marvel_cards.db')
+    cursor = conn.cursor()
+    
+    # URL para encounter cards (incluye villanos)
+    encounter_url = "https://marvelcdb.com/api/public/cards?encounter=true"
+    
+    try:
+        print("📡 Obteniendo encounter cards...")
+        response = requests.get(encounter_url)
+        response.raise_for_status()
+        
+        encounter_cards = response.json()
+        print(f"✅ Obtenidas {len(encounter_cards)} encounter cards")
+        
+        # Filtrar solo encounter cards que no sean de jugador
+        encounter_only = []
+        player_cards = set()
+        
+        # Primero obtener todas las cartas de jugador para evitar duplicados
+        player_url = "https://marvelcdb.com/api/public/cards"
+        player_response = requests.get(player_url)
+        player_cards_data = player_response.json()
+        
+        for card in player_cards_data:
+            player_cards.add(card.get('code', ''))
+        
+        # Filtrar encounter cards que no sean de jugador
+        for card in encounter_cards:
+            card_code = card.get('code', '')
+            card_type = card.get('type_code', '')
+            
+            # Solo incluir si es encounter card o si no está en player cards
+            if card_code not in player_cards or card_type in ['villain', 'main_scheme', 'side_scheme', 'minion', 'attachment', 'treachery', 'environment']:
+                encounter_only.append(card)
+        
+        print(f"✅ Filtradas {len(encounter_only)} encounter cards únicas")
+        
+        # Importar encounter cards a la tabla cards normal
+        imported_count = 0
+        for card in encounter_only:
+            try:
+                # Mapear datos de la API a nuestra estructura (igual que las cartas de jugador)
+                # Obtener el set_code correcto basado en el pack_name
+                pack_name = card.get('pack_name', '')
+                set_code = None
+                
+                # Mapear pack_name a set_code (igual que las cartas de jugador)
+                if pack_name == 'Core Set':
+                    set_code = 'core'
+                elif pack_name == 'The Green Goblin':
+                    set_code = 'gg'
+                elif pack_name == 'Wrecking Crew':
+                    set_code = 'wc'
+                # Añadir más mapeos según sea necesario
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO cards (
+                        name, cost, type, aspect, pack_name, quantity, 
+                        deck_limit, card_set, set_code
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    card.get('name', ''),
+                    card.get('cost', 0),
+                    card.get('type_name', '').lower(),  # Normalizar a minúscula
+                    card.get('faction_name', '').lower(),  # Normalizar a minúscula
+                    pack_name,
+                    card.get('quantity', 1),
+                    card.get('deck_limit', None),
+                    pack_name,  # Usar pack_name como card_set
+                    set_code  # Añadir set_code para que el frontend las encuentre
+                ))
+                
+                imported_count += 1
+                
+            except Exception as e:
+                print(f"❌ Error procesando carta {card.get('name', 'Unknown')}: {e}")
+                continue
+        
+        conn.commit()
+        print(f"✅ Importadas {imported_count} encounter cards a la tabla cards")
+        
+        # Verificar qué se importó
+        print("\n📊 Verificación de importación:")
+        
+        # Contar villanos
+        cursor.execute("SELECT COUNT(*) FROM cards WHERE type = 'villain'")
+        villain_count = cursor.fetchone()[0]
+        print(f"👹 Villanos: {villain_count}")
+        
+        # Contar encounter cards por tipo
+        cursor.execute("SELECT type, COUNT(*) FROM cards WHERE type IN ('villain', 'main scheme', 'side scheme', 'minion', 'attachment', 'treachery', 'environment') GROUP BY type")
+        encounter_types = cursor.fetchall()
+        
+        print("🎭 Encounter cards por tipo:")
+        for card_type, count in encounter_types:
+            print(f"- {card_type}: {count}")
+        
+        # Mostrar algunos villanos del Core Set
+        print("\n🦏 Villanos del Core Set:")
+        cursor.execute("SELECT name, cost, type FROM cards WHERE type = 'villain' AND pack_name = 'Core Set' LIMIT 5")
+        core_villains = cursor.fetchall()
+        for villain in core_villains:
+            print(f"- {villain[0]} (cost: {villain[1]}, type: {villain[2]})")
+        
+    except Exception as e:
+        print(f"❌ Error general: {e}")
+        conn.rollback()
+    
+    finally:
+        conn.close()
+
 def main():
     """Función principal - inicializar todo"""
     print("🚀 INICIALIZACIÓN COMPLETA DE MARVELCDB")
@@ -343,6 +467,9 @@ def main():
     decks_data = fetch_popular_decks()
     if decks_data:
         import_decks(decks_data)
+    
+    # 6. Importar villanos y encounter cards
+    import_villains_and_encounters()
     
     print("=" * 60)
     print("🎉 ¡INICIALIZACIÓN COMPLETA!")

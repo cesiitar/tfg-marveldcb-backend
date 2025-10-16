@@ -271,10 +271,10 @@ async def get_cards_by_set(
     '''
     params = [set_code]
     
-    # Añadir filtro de búsqueda si se proporciona
+    # Añadir filtro de búsqueda si se proporciona (startsWith en lugar de includes)
     if search:
         query += ' AND name LIKE ?'
-        params.append(f'%{search}%')
+        params.append(f'{search}%')
     
     # Añadir ordenamiento
     if sort_by == 'clase':
@@ -444,7 +444,7 @@ async def search_cards(
     
     if name:
         query += ' AND name LIKE ?'
-        params.append(f'%{name}%')
+        params.append(f'{name}%')
     
     if aspect:
         query += ' AND aspect = ?'
@@ -542,7 +542,8 @@ async def get_public_decks():
             try:
                 uid = row["user_id"]
                 if uid:
-                    cursor.execute('SELECT name FROM users WHERE auth0_id = ?', (uid,))
+                    # Ahora user_id es el ID numérico, no el auth0_id
+                    cursor.execute('SELECT name FROM users WHERE id = ?', (uid,))
                     user_row = cursor.fetchone()
                     if user_row and user_row[0]:
                         creator_name = user_row[0]
@@ -580,6 +581,10 @@ async def create_deck(deck_data: dict, request: Request):
         ensure_decks_columns()
         auth0_id = request.headers.get('X-Auth0-ID')
         
+        # Debug log
+        print(f"🔍 POST /api/decks - Auth0_ID recibido: {auth0_id}")
+        print(f"📦 Datos recibidos: {deck_data}")
+        
         if not auth0_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -589,13 +594,17 @@ async def create_deck(deck_data: dict, request: Request):
         user = get_user_by_auth0_id(auth0_id)
         
         if not user:
+            print(f"❌ Usuario no encontrado para Auth0_ID: {auth0_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found in database"
             )
         
+        print(f"✅ Usuario encontrado: ID={user['id']}, Name={user['name']}")
+        
         # Validar datos requeridos
         if not deck_data.get('name') or not deck_data.get('hero_name') or not deck_data.get('cards') or not deck_data.get('aspect'):
+            print(f"❌ Campos faltantes - name: {deck_data.get('name')}, hero_name: {deck_data.get('hero_name')}, cards: {deck_data.get('cards')}, aspect: {deck_data.get('aspect')}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing required fields: name, hero_name, aspect, cards"
@@ -604,77 +613,102 @@ async def create_deck(deck_data: dict, request: Request):
         aspect = deck_data.get('aspect')
         allowed_aspects = {"aggression", "justice", "leadership", "protection"}
         if aspect not in allowed_aspects:
+            print(f"❌ Aspect inválido: {aspect}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid aspect. Allowed: aggression, justice, leadership, protection"
             )
         
+        print(f"✅ Aspect válido: {aspect}")
+        
         # Validar que el mazo tenga exactamente 40 cartas (sin contar el héroe)
         cards = deck_data.get('cards', [])
+        print(f"🔢 Validando {len(cards)} cartas...")
+        
         # Validar quantity > 0 y entero
-        for card in cards:
+        for i, card in enumerate(cards):
             quantity = card.get('quantity', 0)
             if not isinstance(quantity, int) or quantity <= 0:
+                print(f"❌ Carta {i+1} cantidad inválida: {quantity}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Each card quantity must be a positive integer"
                 )
+        
         total_cards = sum(card.get('quantity', 1) for card in cards)
+        print(f"🔢 Total de cartas: {total_cards}")
         
         if total_cards != 40:
+            print(f"❌ Mazo debe tener exactamente 40 cartas, tiene {total_cards}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Deck must have exactly 40 cards (excluding hero). Current: {total_cards} cards"
             )
         
+        print(f"✅ Mazo tiene exactamente 40 cartas")
+        
         # Validar que todas las cartas existan en la base de datos
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        for card in cards:
+        print(f"🔍 Validando existencia de cartas...")
+        for i, card in enumerate(cards):
             card_name = card.get('card_name', card.get('name', ''))
-            cursor.execute('SELECT name, deck_limit FROM cards WHERE name = ?', (card_name,))
+            card_set = card.get('card_set', '')
+            quantity = card.get('quantity', 1)
+            
+            # Buscar carta por nombre Y set
+            cursor.execute('SELECT name, deck_limit, pack_name FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
             row = cursor.fetchone()
+            
             if not row:
+                print(f"❌ Carta {i+1} no existe: {card_name} del set {card_set}")
                 conn.close()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Card '{card_name}' does not exist in database"
+                    detail=f"Card '{card_name}' from set '{card_set}' does not exist in database"
                 )
+            
+            print(f"✅ Carta {i+1} existe: {card_name} del set {card_set} (cantidad: {quantity})")
+            
             # Enforce deck_limit si existe
             deck_limit = None
             try:
                 deck_limit = row["deck_limit"]
             except Exception:
                 deck_limit = None
+                
             if deck_limit is not None and isinstance(deck_limit, int):
-                if card.get('quantity', 1) > deck_limit:
+                if quantity > deck_limit:
+                    print(f"❌ Carta {i+1} excede límite: {card_name} del set {card_set} ({quantity} > {deck_limit})")
                     conn.close()
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Card '{card_name}' exceeds deck limit ({deck_limit})"
+                        detail=f"Card '{card_name}' from set '{card_set}' exceeds deck limit ({deck_limit})"
                     )
+                else:
+                    print(f"✅ Carta {i+1} dentro del límite: {card_name} del set {card_set} ({quantity} <= {deck_limit})")
         
-        # Reutilizar la conexión existente
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        print(f"✅ Todas las cartas validadas correctamente")
         
         # Primero verificar si la tabla decks tiene la columna user_id
         cursor.execute("PRAGMA table_info(decks)")
         columns = [column[1] for column in cursor.fetchall()]
         
         if 'user_id' not in columns:
-            # Añadir la columna user_id si no existe
-            cursor.execute('ALTER TABLE decks ADD COLUMN user_id TEXT')
+            # Añadir la columna user_id como INTEGER (no TEXT)
+            cursor.execute('ALTER TABLE decks ADD COLUMN user_id INTEGER')
         
-        # Procesar cartas para el formato correcto
+        # Procesar cartas para el formato correcto (incluyendo card_set)
         processed_cards = []
         for card in deck_data.get('cards', []):
             processed_cards.append({
                 "card_name": card.get('card_name', card.get('name', '')),
+                "card_set": card.get('card_set', ''),
                 "quantity": card.get('quantity', 1)
             })
         
+        print(f"💾 Insertando mazo en la base de datos...")
         cursor.execute('''
             INSERT INTO decks (name, description, hero_name, aspect, cards, is_public, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -685,8 +719,10 @@ async def create_deck(deck_data: dict, request: Request):
             deck_data.get("aspect"),
             json.dumps(processed_cards),
             1,  # Siempre público por ahora
-            auth0_id  # ID del usuario de Auth0
+            user["id"]  # ID numérico del usuario
         ))
+        
+        print(f"✅ Mazo insertado correctamente")
         
         deck_id = cursor.lastrowid
         conn.commit()
@@ -767,7 +803,8 @@ async def get_deck(deck_id: int):
             cursor.execute('SELECT user_id FROM decks WHERE id = ?', (deck_id,))
             uid_row = cursor.fetchone()
             if uid_row and uid_row[0]:
-                cursor.execute('SELECT name FROM users WHERE auth0_id = ?', (uid_row[0],))
+                # Ahora user_id es el ID numérico, no el auth0_id
+                cursor.execute('SELECT name FROM users WHERE id = ?', (uid_row[0],))
                 user_row = cursor.fetchone()
                 if user_row and user_row[0]:
                     creator_name = user_row[0]
@@ -852,8 +889,8 @@ async def get_user_stats(request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Contar mazos del usuario usando el Auth0 ID almacenado en decks.user_id
-        cursor.execute('SELECT COUNT(*) FROM decks WHERE user_id = ?', (auth0_id,))
+        # Contar mazos del usuario usando el ID numérico del usuario
+        cursor.execute('SELECT COUNT(*) FROM decks WHERE user_id = ?', (user["id"],))
         deck_count = cursor.fetchone()[0]
         
         conn.close()
@@ -907,7 +944,7 @@ async def get_user_decks(request: Request):
             FROM decks 
             WHERE user_id = ?
             ORDER BY created_at DESC
-        ''', (auth0_id,))
+        ''', (user["id"],))
         
         decks = []
         for row in cursor.fetchall():
@@ -967,11 +1004,15 @@ async def get_user_decks(request: Request):
             detail=f"Internal server error: {str(e)}"
         )
 
-@app.put("/api/user/decks/{deck_id}")
-async def update_user_deck(deck_id: int, deck_data: dict, request: Request):
-    """Actualizar un mazo del usuario"""
+@app.put("/api/decks/{deck_id}")
+async def update_deck(deck_id: int, deck_data: dict, request: Request):
+    """Actualizar un mazo existente"""
     try:
+        ensure_decks_columns()
         auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Debug log
+        print(f"🔍 PUT /api/decks/{deck_id} - Auth0_ID recibido: {auth0_id}")
         
         if not auth0_id:
             raise HTTPException(
@@ -982,45 +1023,107 @@ async def update_user_deck(deck_id: int, deck_data: dict, request: Request):
         user = get_user_by_auth0_id(auth0_id)
         
         if not user:
+            print(f"❌ Usuario no encontrado para Auth0_ID: {auth0_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found in database"
             )
         
+        print(f"✅ Usuario encontrado: ID={user['id']}, Name={user['name']}")
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Verificar si el mazo pertenece al usuario
+        # Verificar que el mazo existe y pertenece al usuario
         cursor.execute('''
-            SELECT id FROM decks 
+            SELECT id, user_id FROM decks 
             WHERE id = ? AND user_id = ?
-        ''', (deck_id, auth0_id))
+        ''', (deck_id, user["id"]))
         
-        if not cursor.fetchone():
+        deck = cursor.fetchone()
+        
+        if not deck:
+            print(f"❌ Mazo {deck_id} no encontrado o no pertenece al usuario {user['id']}")
             conn.close()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Mazo no encontrado o no tienes permisos"
+                detail="Deck not found or does not belong to user"
             )
         
+        print(f"✅ Mazo encontrado: ID={deck[0]}, User_ID={deck[1]}")
+        
+        # Validar datos del mazo
+        required_fields = ['name', 'hero_name', 'cards']
+        for field in required_fields:
+            if field not in deck_data:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Validar que el mazo tenga exactamente 40 cartas (excluyendo el héroe)
+        total_cards = sum(card.get('quantity', 0) for card in deck_data['cards'])
+        if total_cards != 40:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Deck must have exactly 40 cards, has {total_cards}"
+            )
+        
+        # Validar que todas las cartas existan y respeten los límites
+        for card in deck_data['cards']:
+            card_name = card.get('card_name')
+            card_set = card.get('card_set', '')
+            quantity = card.get('quantity', 0)
+            
+            if not card_name:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Card name is required"
+                )
+            
+            # Verificar que la carta existe por nombre Y set
+            cursor.execute('SELECT deck_limit FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
+            card_info = cursor.fetchone()
+            
+            if not card_info:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Card '{card_name}' from set '{card_set}' does not exist"
+                )
+            
+            # Verificar límite de cartas
+            deck_limit = card_info[0] if card_info[0] is not None else 3
+            if quantity > deck_limit:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Card '{card_name}' from set '{card_set}' quantity ({quantity}) exceeds deck limit ({deck_limit})"
+                )
+        
+        # Actualizar el mazo
         cursor.execute('''
             UPDATE decks 
-            SET name = ?, description = ?, hero_name = ?, aspect = ?, cards = ?
+            SET name = ?, hero_name = ?, cards = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND user_id = ?
         ''', (
-            deck_data.get("name", ""),
-            deck_data.get("description", ""),
-            deck_data.get("heroName", ""),
-            deck_data.get("aspect", ""),
-            json.dumps(deck_data.get("cards", [])),
+            deck_data['name'],
+            deck_data['hero_name'],
+            json.dumps(deck_data['cards']),
             deck_id,
-            auth0_id
+            user["id"]
         ))
         
         conn.commit()
         conn.close()
         
-        return {"message": "Mazo actualizado exitosamente"}
+        return {
+            "message": "Deck updated successfully",
+            "deck_id": deck_id
+        }
         
     except HTTPException:
         raise
@@ -1030,10 +1133,11 @@ async def update_user_deck(deck_id: int, deck_data: dict, request: Request):
             detail=f"Internal server error: {str(e)}"
         )
 
-@app.delete("/api/user/decks/{deck_id}")
-async def delete_user_deck(deck_id: int, request: Request):
-    """Eliminar un mazo del usuario"""
+@app.delete("/api/decks/{deck_id}")
+async def delete_deck(deck_id: int, request: Request):
+    """Eliminar un mazo existente"""
     try:
+        ensure_decks_columns()
         auth0_id = request.headers.get('X-Auth0-ID')
         
         if not auth0_id:
@@ -1053,28 +1157,31 @@ async def delete_user_deck(deck_id: int, request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Verificar si el mazo pertenece al usuario
+        # Verificar que el mazo existe y pertenece al usuario
         cursor.execute('''
             SELECT id FROM decks 
             WHERE id = ? AND user_id = ?
-        ''', (deck_id, auth0_id))
+        ''', (deck_id, user["id"]))
         
-        if not cursor.fetchone():
+        deck = cursor.fetchone()
+        
+        if not deck:
             conn.close()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Mazo no encontrado o no tienes permisos"
+                detail="Deck not found or does not belong to user"
             )
         
-        cursor.execute('''
-            DELETE FROM decks 
-            WHERE id = ? AND user_id = ?
-        ''', (deck_id, auth0_id))
+        # Eliminar el mazo
+        cursor.execute('DELETE FROM decks WHERE id = ? AND user_id = ?', (deck_id, user["id"]))
         
         conn.commit()
         conn.close()
         
-        return {"message": "Mazo eliminado exitosamente"}
+        return {
+            "message": "Deck deleted successfully",
+            "deck_id": deck_id
+        }
         
     except HTTPException:
         raise
@@ -1088,4 +1195,5 @@ if __name__ == "__main__":
     # Inicializar tabla de usuarios al arrancar
     init_users_table()
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
