@@ -651,25 +651,42 @@ async def create_deck(deck_data: dict, request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        print(f"🔍 Validando existencia de cartas...")
+        print(f"🔍 Validando existencia de cartas y asignando clases...")
         for i, card in enumerate(cards):
+            card_id = card.get('card_id')
             card_name = card.get('card_name', card.get('name', ''))
             card_set = card.get('card_set', '')
             quantity = card.get('quantity', 1)
             
-            # Buscar carta por nombre Y set
-            cursor.execute('SELECT name, deck_limit, pack_name FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
-            row = cursor.fetchone()
-            
-            if not row:
-                print(f"❌ Carta {i+1} no existe: {card_name} del set {card_set}")
-                conn.close()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Card '{card_name}' from set '{card_set}' does not exist in database"
-                )
-            
-            print(f"✅ Carta {i+1} existe: {card_name} del set {card_set} (cantidad: {quantity})")
+            # Si se proporciona card_id, buscar por ID (más preciso)
+            if card_id:
+                cursor.execute('SELECT name, deck_limit, pack_name, aspect FROM cards WHERE id = ?', (card_id,))
+                row = cursor.fetchone()
+                if not row:
+                    print(f"❌ Carta {i+1} no existe: ID {card_id}")
+                    conn.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Card with ID {card_id} does not exist in database"
+                    )
+                # Asignar la clase correcta automáticamente
+                card['clase'] = row[3]  # aspect de la base de datos
+                print(f"✅ Carta {i+1} existe: {row[0]} (ID: {card_id}) - Clase asignada: {row[3]}")
+            else:
+                # Fallback: buscar por nombre y set (método anterior)
+                cursor.execute('SELECT name, deck_limit, pack_name, aspect FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
+                row = cursor.fetchone()
+                
+                if not row:
+                    print(f"❌ Carta {i+1} no existe: {card_name} del set {card_set}")
+                    conn.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Card '{card_name}' from set '{card_set}' does not exist in database"
+                    )
+                # Asignar la clase correcta automáticamente
+                card['clase'] = row[3]  # aspect de la base de datos
+                print(f"✅ Carta {i+1} existe: {row[0]} del set {card_set} - Clase asignada: {row[3]}")
             
             # Enforce deck_limit si existe
             deck_limit = None
@@ -1073,27 +1090,43 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
         
         # Validar que todas las cartas existan y respeten los límites
         for card in deck_data['cards']:
+            card_id = card.get('card_id')
             card_name = card.get('card_name')
             card_set = card.get('card_set', '')
             quantity = card.get('quantity', 0)
             
-            if not card_name:
+            if not card_name and not card_id:
                 conn.close()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Card name is required"
+                    detail="Card name or card_id is required"
                 )
             
-            # Verificar que la carta existe por nombre Y set
-            cursor.execute('SELECT deck_limit FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
-            card_info = cursor.fetchone()
-            
-            if not card_info:
-                conn.close()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Card '{card_name}' from set '{card_set}' does not exist"
-                )
+            # Si se proporciona card_id, buscar por ID (más preciso)
+            if card_id:
+                cursor.execute('SELECT deck_limit, aspect FROM cards WHERE id = ?', (card_id,))
+                card_info = cursor.fetchone()
+                if not card_info:
+                    conn.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Card with ID {card_id} does not exist"
+                    )
+                # Asignar la clase correcta automáticamente
+                card['clase'] = card_info[1]  # aspect de la base de datos
+            else:
+                # Fallback: buscar por nombre y set
+                cursor.execute('SELECT deck_limit, aspect FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
+                card_info = cursor.fetchone()
+                
+                if not card_info:
+                    conn.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Card '{card_name}' from set '{card_set}' does not exist"
+                    )
+                # Asignar la clase correcta automáticamente
+                card['clase'] = card_info[1]  # aspect de la base de datos
             
             # Verificar límite de cartas
             deck_limit = card_info[0] if card_info[0] is not None else 3
