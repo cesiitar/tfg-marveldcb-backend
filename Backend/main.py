@@ -108,6 +108,16 @@ def ensure_decks_columns():
         cursor.execute('ALTER TABLE decks ADD COLUMN is_public INTEGER DEFAULT 1')
         altered = True
 
+    # description para descripción del mazo (opcional)
+    if 'description' not in columns:
+        cursor.execute('ALTER TABLE decks ADD COLUMN description TEXT')
+        altered = True
+
+    # hero_id para vincular con la tabla de héroes por ID (más seguro que hero_name)
+    if 'hero_id' not in columns:
+        cursor.execute('ALTER TABLE decks ADD COLUMN hero_id INTEGER')
+        altered = True
+
     if altered:
         conn.commit()
     conn.close()
@@ -539,7 +549,7 @@ async def get_public_decks():
     # Mostrar todo lo que sea público (1) o legacy (NULL). Todos los mazos creados por usuarios se guardan como públicos.
     if 'user_id' in columns:
         cursor.execute('''
-            SELECT id, name, description, hero_name, aspect, cards, created_at, user_id
+            SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at, user_id
             FROM decks 
             WHERE is_public = 1 OR is_public IS NULL
             ORDER BY created_at DESC
@@ -632,6 +642,7 @@ async def get_public_decks():
             "name": row["name"],
             "description": row["description"],
             "hero_name": row["hero_name"],
+            "hero_id": row["hero_id"],  # Campo opcional
             "aspect": row["aspect"],
             "cards": cards_data,
             "created_at": row["created_at"],
@@ -804,13 +815,16 @@ async def create_deck(deck_data: dict, request: Request):
             })
         
         print(f"💾 Insertando mazo en la base de datos...")
+        print(f"📝 Descripción recibida: '{deck_data.get('description', '')}'") 
+        print(f"🦸 Hero ID recibido: {deck_data.get('hero_id')}")
         cursor.execute('''
-            INSERT INTO decks (name, description, hero_name, aspect, cards, is_public, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO decks (name, description, hero_name, hero_id, aspect, cards, is_public, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             deck_data.get("name", ""),
             deck_data.get("description", ""),
             deck_data.get("hero_name", ""),
+            deck_data.get("hero_id"),  # Campo opcional
             deck_data.get("aspect"),
             json.dumps(processed_cards),
             1,  # Siempre público por ahora
@@ -854,7 +868,7 @@ async def get_deck(deck_id: int):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, name, description, hero_name, aspect, cards, created_at
+        SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at
         FROM decks 
         WHERE id = ? AND is_public = 1
     ''', (deck_id,))
@@ -946,11 +960,14 @@ async def get_deck(deck_id: int):
         "name": row["name"],
         "description": row["description"],
         "hero_name": row["hero_name"],
+        "hero_id": row["hero_id"],  # Campo opcional
         "aspect": row["aspect"],
         "cards": cards_data,
         "created_at": row["created_at"],
         "creator_name": creator_name
     }
+    
+    print(f"📤 Devolviendo mazo con descripción: '{row['description']}'")
     
     conn.close()
     return deck
@@ -1070,7 +1087,7 @@ async def get_user_decks(request: Request):
             return {"decks": []}
         
         cursor.execute('''
-            SELECT id, name, description, hero_name, aspect, cards, created_at, is_public
+            SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at, is_public
             FROM decks 
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -1145,6 +1162,7 @@ async def get_user_decks(request: Request):
                 "name": row["name"],
                 "description": row["description"],
                 "hero_name": row["hero_name"],
+                "hero_id": row["hero_id"],  # Campo opcional
                 "aspect": row["aspect"],
                 "cards": cards_data,
                 "created_at": row["created_at"],
@@ -1178,6 +1196,8 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
         
         # Debug log
         print(f"🔍 PUT /api/decks/{deck_id} - Auth0_ID recibido: {auth0_id}")
+        print(f"📦 Datos recibidos: {deck_data}")
+        print(f"🎯 Cartas en el mazo: {len(deck_data.get('cards', []))}")
         
         if not auth0_id:
             raise HTTPException(
@@ -1229,19 +1249,28 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
         
         # Validar que el mazo tenga entre 40 y 50 cartas (excluyendo el héroe)
         total_cards = sum(card.get('quantity', 0) for card in deck_data['cards'])
+        print(f"🔢 Total de cartas calculado: {total_cards}")
         if total_cards < 40 or total_cards > 50:
+            print(f"❌ Mazo debe tener entre 40 y 50 cartas, tiene {total_cards}")
             conn.close()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Deck must have between 40 and 50 cards, has {total_cards}"
             )
+        print(f"✅ Mazo tiene {total_cards} cartas (válido)")
         
         # Validar que todas las cartas existan y respeten los límites
-        for card in deck_data['cards']:
+        for i, card in enumerate(deck_data['cards']):
+            print(f"🔍 Validando carta {i+1}: {card}")
             card_id = card.get('card_id')
             card_name = card.get('card_name')
             card_set = card.get('card_set', '')
             quantity = card.get('quantity', 0)
+            
+            print(f"   - card_id: {card_id}")
+            print(f"   - card_name: {card_name}")
+            print(f"   - card_set: {card_set}")
+            print(f"   - quantity: {quantity}")
             
             if not card_name and not card_id:
                 conn.close()
@@ -1252,27 +1281,33 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
             
             # Si se proporciona card_id, buscar por ID (más preciso)
             if card_id:
+                print(f"   🔍 Buscando por card_id: {card_id}")
                 cursor.execute('SELECT deck_limit, aspect FROM cards WHERE id = ?', (card_id,))
                 card_info = cursor.fetchone()
                 if not card_info:
+                    print(f"   ❌ Carta con ID {card_id} no encontrada")
                     conn.close()
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Card with ID {card_id} does not exist"
                     )
+                print(f"   ✅ Carta encontrada por ID: deck_limit={card_info[0]}, aspect={card_info[1]}")
                 # Asignar la clase correcta automáticamente
                 card['clase'] = card_info[1]  # aspect de la base de datos
             else:
-                # Fallback: buscar por nombre y set
-                cursor.execute('SELECT deck_limit, aspect FROM cards WHERE name = ? AND pack_name = ?', (card_name, card_set))
+                # Fallback: buscar por nombre y set (card_set O pack_name)
+                print(f"   🔍 Buscando por nombre '{card_name}' y set '{card_set}'")
+                cursor.execute('SELECT deck_limit, aspect FROM cards WHERE name = ? AND (card_set = ? OR pack_name = ?)', (card_name, card_set, card_set))
                 card_info = cursor.fetchone()
                 
                 if not card_info:
+                    print(f"   ❌ Carta '{card_name}' del set '{card_set}' no encontrada")
                     conn.close()
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Card '{card_name}' from set '{card_set}' does not exist"
                     )
+                print(f"   ✅ Carta encontrada por nombre: deck_limit={card_info[0]}, aspect={card_info[1]}")
                 # Asignar la clase correcta automáticamente
                 card['clase'] = card_info[1]  # aspect de la base de datos
             
@@ -1288,11 +1323,13 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
         # Actualizar el mazo
         cursor.execute('''
             UPDATE decks 
-            SET name = ?, hero_name = ?, cards = ?, updated_at = CURRENT_TIMESTAMP
+            SET name = ?, description = ?, hero_name = ?, hero_id = ?, cards = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND user_id = ?
         ''', (
             deck_data['name'],
+            deck_data.get('description', ''),  # Campo opcional
             deck_data['hero_name'],
+            deck_data.get('hero_id'),  # Campo opcional
             json.dumps(deck_data['cards']),
             deck_id,
             user["id"]
