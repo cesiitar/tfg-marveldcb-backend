@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import json
+import re
 from typing import List, Dict, Optional
 
 app = FastAPI(title="MarvelCDB API", version="1.0.0")
@@ -120,6 +121,31 @@ def ensure_decks_columns():
 
     if altered:
         conn.commit()
+    conn.close()
+
+# =============================================================================
+# UTILIDADES DE ESQUEMA (game_configurations)
+# =============================================================================
+def ensure_game_configurations_table():
+    """Crear la tabla game_configurations si no existe."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Crear la tabla game_configurations
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS game_configurations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            deck_id INTEGER NOT NULL,        -- ID del mazo
+            difficulty TEXT NOT NULL,        -- "normal" o "expert"
+            villain TEXT NOT NULL,           -- Nombre del villano
+            result TEXT NOT NULL,            -- "win" o "loss"
+            played_at TEXT NOT NULL,         -- Timestamp ISO de cuándo se jugó
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))  -- Cuándo se guardó
+        )
+    ''')
+    
+    conn.commit()
     conn.close()
 
 # =============================================================================
@@ -365,6 +391,27 @@ async def get_heroes():
     
     conn.close()
     return heroes  # Devolver array directo como espera el frontend
+
+@app.get("/api/villains")
+async def get_villains():
+    """Obtener todos los nombres únicos de sets de villanos"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Obtener solo los nombres únicos de card_set de villanos
+    cursor.execute('''
+        SELECT DISTINCT card_set
+        FROM cards 
+        WHERE type = 'villain' AND card_set IS NOT NULL
+        ORDER BY card_set
+    ''')
+    
+    villains = []
+    for row in cursor.fetchall():
+        villains.append(row["card_set"])
+    
+    conn.close()
+    return villains
 
 @app.get("/api/heroes/{hero_id}/cards")
 async def get_hero_cards(hero_id: int):
@@ -851,13 +898,128 @@ async def create_deck(deck_data: dict, request: Request):
                 "creator_name": user.get("name")
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating deck: {str(e)}"
+        )
+
+@app.post("/api/game-configurations", status_code=201)
+async def create_game_configuration(config_data: dict, request: Request):
+    """Crear una nueva configuración de partida"""
+    try:
+        ensure_game_configurations_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Debug log
+        print(f"🎮 POST /api/game-configurations - Auth0_ID recibido: {auth0_id}")
+        print(f"📦 Datos recibidos: {config_data}")
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        # Validar datos requeridos
+        required_fields = ['deck_id', 'difficulty', 'villain', 'result', 'played_at']
+        for field in required_fields:
+            if not config_data.get(field):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Validar difficulty
+        difficulty = config_data.get('difficulty')
+        if difficulty not in ['normal', 'expert']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid difficulty. Allowed: normal, expert"
+            )
+        
+        # Validar result
+        result = config_data.get('result')
+        if result not in ['win', 'loss']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid result. Allowed: win, loss"
+            )
+        
+        # Validar que el deck pertenece al usuario
+        deck_id = config_data.get('deck_id')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id FROM decks WHERE id = ? AND user_id = ?
+        ''', (deck_id, user['id']))
+        
+        deck_row = cursor.fetchone()
+        if not deck_row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Deck not found or does not belong to user"
+            )
+        
+        # Validar que el villano existe
+        villain = config_data.get('villain')
+        cursor.execute('''
+            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND card_set = ?
+        ''', (villain,))
+        
+        villain_count = cursor.fetchone()[0]
+        if villain_count == 0:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Villain not found"
+            )
+        
+        # Insertar la configuración de partida
+        cursor.execute('''
+            INSERT INTO game_configurations (
+                user_id, deck_id, difficulty, villain, result, played_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            user['id'],
+            deck_id,
+            difficulty,
+            villain,
+            result,
+            config_data.get('played_at')
+        ))
+        
+        game_config_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Configuración de partida creada: ID={game_config_id}")
+        
+        return {
+            "message": "Configuración de partida guardada correctamente",
+            "game_configuration_id": game_config_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creando configuración de partida: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating game configuration: {str(e)}"
         )
 
 @app.get("/api/decks/{deck_id}")

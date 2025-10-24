@@ -394,7 +394,7 @@ def import_villains_and_encounters():
                     pack_name,
                     card.get('quantity', 1),
                     card.get('deck_limit', None),
-                    pack_name,  # Usar pack_name como card_set
+                    card.get('card_set_name', pack_name),  # Usar card_set_name de la API, fallback a pack_name
                     set_code  # Añadir set_code para que el frontend las encuentre
                 ))
                 
