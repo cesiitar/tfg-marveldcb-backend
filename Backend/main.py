@@ -140,8 +140,32 @@ def ensure_game_configurations_table():
             difficulty TEXT NOT NULL,        -- "normal" o "expert"
             villain TEXT NOT NULL,           -- Nombre del villano
             result TEXT NOT NULL,            -- "win" o "loss"
-            played_at TEXT NOT NULL,         -- Timestamp ISO de cuándo se jugó
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))  -- Cuándo se guardó
+            played_at TEXT NOT NULL          -- Timestamp ISO de cuándo se jugó
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# =============================================================================
+# UTILIDADES DE ESQUEMA (user_favorites)
+# =============================================================================
+def ensure_user_favorites_table():
+    """Crear la tabla user_favorites si no existe."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Crear la tabla user_favorites
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            deck_id INTEGER NOT NULL,         -- ID del mazo favorito
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),  -- Cuándo se marcó como favorito
+            
+            -- Restricciones importantes:
+            UNIQUE(user_id, deck_id),         -- Evitar duplicados
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE  -- Si se elimina un mazo, se eliminan sus favoritos
         )
     ''')
     
@@ -974,10 +998,10 @@ async def create_game_configuration(config_data: dict, request: Request):
                 detail="Deck not found or does not belong to user"
             )
         
-        # Validar que el villano existe
+        # Validar que el villano existe (case-insensitive)
         villain = config_data.get('villain')
         cursor.execute('''
-            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND card_set = ?
+            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
         ''', (villain,))
         
         villain_count = cursor.fetchone()[0]
@@ -1133,6 +1157,172 @@ async def get_deck(deck_id: int):
     
     conn.close()
     return deck
+
+@app.get("/api/decks/{deck_id}/is-favorite")
+async def check_deck_favorite(deck_id: int, request: Request):
+    """Verificar si un mazo es favorito del usuario autenticado"""
+    try:
+        ensure_user_favorites_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar si el mazo existe
+        cursor.execute('SELECT id FROM decks WHERE id = ?', (deck_id,))
+        deck_row = cursor.fetchone()
+        if not deck_row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Deck not found"
+            )
+        
+        # Verificar si es favorito
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM user_favorites 
+            WHERE user_id = ? AND deck_id = ?
+        ''', (user["id"], deck_id))
+        
+        count = cursor.fetchone()[0]
+        is_favorite = count > 0
+        
+        conn.close()
+        
+        return {"is_favorite": is_favorite}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.post("/api/favorites")
+async def toggle_favorite(favorite_data: dict, request: Request):
+    """Añadir o quitar un mazo de favoritos"""
+    try:
+        ensure_user_favorites_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        # Validar datos requeridos
+        deck_id = favorite_data.get('deck_id')
+        action = favorite_data.get('action')
+        
+        if not deck_id or not action:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required fields: deck_id, action"
+            )
+        
+        if action not in ['add', 'remove']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid action. Allowed: add, remove"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que el mazo existe
+        cursor.execute('SELECT id FROM decks WHERE id = ?', (deck_id,))
+        deck_row = cursor.fetchone()
+        if not deck_row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Deck not found"
+            )
+        
+        # Verificar si ya es favorito
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM user_favorites 
+            WHERE user_id = ? AND deck_id = ?
+        ''', (user["id"], deck_id))
+        
+        count = cursor.fetchone()[0]
+        is_favorite = count > 0
+        
+        if action == 'add':
+            if is_favorite:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Deck is already in favorites"
+                )
+            
+            # Añadir a favoritos
+            cursor.execute('''
+                INSERT INTO user_favorites (user_id, deck_id)
+                VALUES (?, ?)
+            ''', (user["id"], deck_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                "message": "Favorito añadido correctamente",
+                "is_favorite": True
+            }
+        
+        else:  # action == 'remove'
+            if not is_favorite:
+                conn.close()
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Deck is not in favorites"
+                )
+            
+            # Quitar de favoritos
+            cursor.execute('''
+                DELETE FROM user_favorites 
+                WHERE user_id = ? AND deck_id = ?
+            ''', (user["id"], deck_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                "message": "Favorito eliminado correctamente",
+                "is_favorite": False
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 # =============================================================================
 # ENDPOINTS PROTEGIDOS (requieren autenticación)
@@ -1340,6 +1530,108 @@ async def get_user_decks(request: Request):
             "user_id": user["id"],
             "total_decks": len(decks)
         }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.get("/api/user/favorites")
+async def get_user_favorites(request: Request):
+    """Obtener mazos favoritos del usuario autenticado"""
+    try:
+        ensure_user_favorites_table()
+        ensure_decks_columns()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener mazos favoritos del usuario
+        cursor.execute('''
+            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at as favorited_at
+            FROM decks d
+            JOIN user_favorites uf ON d.id = uf.deck_id
+            WHERE uf.user_id = ?
+            ORDER BY uf.created_at DESC
+        ''', (user["id"],))
+        
+        favorites = []
+        for row in cursor.fetchall():
+            try:
+                raw_cards = json.loads(row["cards"]) if row["cards"] else []
+            except json.JSONDecodeError:
+                raw_cards = []
+            
+            # Procesar cartas del mazo
+            cards_data = []
+            for c in raw_cards:
+                card_id = c.get("card_id")
+                card_name = c.get("card_name") or c.get("name") or c.get("code")
+                card_set = c.get("card_set", "")
+                
+                if card_id:
+                    cursor.execute('SELECT type, aspect, pack_name, card_set FROM cards WHERE id = ?', (card_id,))
+                    card_info = cursor.fetchone()
+                    
+                    if card_info:
+                        card_data = {
+                            "card_id": card_id,
+                            "card_name": card_name,
+                            "card_set": card_info[3] or card_set,
+                            "quantity": c.get("quantity", 1),
+                            "type": card_info[0],
+                            "clase": card_info[1],
+                            "set": card_info[2] or "Unknown"
+                        }
+                    else:
+                        card_data = {
+                            "card_id": card_id,
+                            "card_name": card_name,
+                            "card_set": card_set,
+                            "quantity": c.get("quantity", 1)
+                        }
+                else:
+                    card_data = {
+                        "card_name": card_name,
+                        "card_set": card_set,
+                        "quantity": c.get("quantity", 1)
+                    }
+                
+                cards_data.append(card_data)
+            
+            favorite = {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "hero_name": row["hero_name"],
+                "hero_id": row["hero_id"],
+                "aspect": row["aspect"],
+                "cards": cards_data,
+                "created_at": row["created_at"],
+                "favorited_at": row["favorited_at"]
+            }
+            favorites.append(favorite)
+        
+        conn.close()
+        
+        return {"favorites": favorites}
         
     except HTTPException:
         raise
