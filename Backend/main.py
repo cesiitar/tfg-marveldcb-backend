@@ -138,11 +138,54 @@ def ensure_game_configurations_table():
             user_id TEXT NOT NULL,           -- auth0_sub del usuario
             deck_id INTEGER NOT NULL,        -- ID del mazo
             difficulty TEXT NOT NULL,        -- "normal" o "expert"
-            villain TEXT NOT NULL,           -- Nombre del villano
+            villain_id INTEGER NOT NULL,      -- ID del villano (referencia a cards.id)
             result TEXT NOT NULL,            -- "win" o "loss"
-            played_at TEXT NOT NULL          -- Timestamp ISO de cuándo se jugó
+            played_at TEXT NOT NULL,         -- Timestamp ISO de cuándo se jugó
+            
+            FOREIGN KEY (villain_id) REFERENCES cards(id)
         )
     ''')
+    
+    # Verificar si existe la columna 'villain' (nombre) para migrar datos
+    cursor.execute("PRAGMA table_info(game_configurations)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'villain' in columns and 'villain_id' not in columns:
+        # Migrar datos de villain (nombre) a villain_id (ID)
+        print("🔄 Migrando datos de villain (nombre) a villain_id (ID)...")
+        
+        # Añadir columna villain_id
+        cursor.execute('ALTER TABLE game_configurations ADD COLUMN villain_id INTEGER')
+        
+        # Migrar datos existentes
+        cursor.execute('SELECT id, villain FROM game_configurations WHERE villain IS NOT NULL')
+        existing_configs = cursor.fetchall()
+        
+        migrated_count = 0
+        for config_id, villain_name in existing_configs:
+            # Buscar el ID del villano por nombre
+            cursor.execute('''
+                SELECT id FROM cards 
+                WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
+                LIMIT 1
+            ''', (villain_name,))
+            
+            villain_row = cursor.fetchone()
+            if villain_row:
+                villain_id = villain_row[0]
+                cursor.execute('''
+                    UPDATE game_configurations 
+                    SET villain_id = ? 
+                    WHERE id = ?
+                ''', (villain_id, config_id))
+                migrated_count += 1
+            else:
+                print(f"⚠️ No se encontró villano: {villain_name}")
+        
+        # Eliminar columna villain (nombre)
+        cursor.execute('ALTER TABLE game_configurations DROP COLUMN villain')
+        
+        print(f"✅ Migrados {migrated_count} registros de game_configurations")
     
     conn.commit()
     conn.close()
@@ -436,6 +479,54 @@ async def get_villains():
     
     conn.close()
     return villains
+
+@app.get("/api/villains/with-ids")
+async def get_villains_with_ids():
+    """Obtener todos los villanos únicos con sus IDs para el frontend"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Obtener villanos únicos con ID y nombre (solo el primer ID de cada villano)
+    cursor.execute('''
+        SELECT MIN(id) as id, card_set as name
+        FROM cards 
+        WHERE type = 'villain' AND card_set IS NOT NULL
+        GROUP BY card_set
+        ORDER BY card_set
+    ''')
+    
+    villains = []
+    for row in cursor.fetchall():
+        villains.append({
+            "id": row["id"],
+            "name": row["name"]
+        })
+    
+    conn.close()
+    return villains
+
+@app.get("/api/villains/{villain_name}/id")
+async def get_villain_id(villain_name: str):
+    """Obtener el ID de un villano por su nombre"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Buscar el villano por nombre (case-insensitive) y tomar el primer ID
+    cursor.execute('''
+        SELECT MIN(id) FROM cards 
+        WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
+    ''', (villain_name,))
+    
+    villain_row = cursor.fetchone()
+    conn.close()
+    
+    if not villain_row or villain_row[0] is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Villain not found"
+        )
+    
+    return {"villain_id": villain_row[0]}
 
 @app.get("/api/heroes/{hero_id}/cards")
 async def get_hero_cards(hero_id: int):
@@ -957,7 +1048,7 @@ async def create_game_configuration(config_data: dict, request: Request):
             )
         
         # Validar datos requeridos
-        required_fields = ['deck_id', 'difficulty', 'villain', 'result', 'played_at']
+        required_fields = ['deck_id', 'difficulty', 'villain_id', 'result', 'played_at']
         for field in required_fields:
             if not config_data.get(field):
                 raise HTTPException(
@@ -998,11 +1089,11 @@ async def create_game_configuration(config_data: dict, request: Request):
                 detail="Deck not found or does not belong to user"
             )
         
-        # Validar que el villano existe (case-insensitive)
-        villain = config_data.get('villain')
+        # Validar que el villano existe por ID
+        villain_id = config_data.get('villain_id')
         cursor.execute('''
-            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
-        ''', (villain,))
+            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND id = ?
+        ''', (villain_id,))
         
         villain_count = cursor.fetchone()[0]
         if villain_count == 0:
@@ -1015,13 +1106,13 @@ async def create_game_configuration(config_data: dict, request: Request):
         # Insertar la configuración de partida
         cursor.execute('''
             INSERT INTO game_configurations (
-                user_id, deck_id, difficulty, villain, result, played_at
+                user_id, deck_id, difficulty, villain_id, result, played_at
             ) VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             user['id'],
             deck_id,
             difficulty,
-            villain,
+            villain_id,
             result,
             config_data.get('played_at')
         ))
@@ -1044,6 +1135,193 @@ async def create_game_configuration(config_data: dict, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating game configuration: {str(e)}"
+        )
+
+@app.get("/api/game-configurations")
+async def get_game_configurations(request: Request):
+    """Obtener todas las partidas del usuario autenticado"""
+    try:
+        ensure_game_configurations_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener partidas del usuario con información del mazo y villano
+        cursor.execute('''
+            SELECT 
+                gc.id,
+                gc.deck_id,
+                gc.difficulty,
+                gc.villain_id,
+                gc.result,
+                gc.played_at,
+                d.name as deck_name,
+                d.hero_name,
+                d.aspect,
+                c.card_set as villain_name
+            FROM game_configurations gc
+            JOIN decks d ON gc.deck_id = d.id
+            JOIN cards c ON gc.villain_id = c.id
+            WHERE gc.user_id = ?
+            ORDER BY gc.played_at DESC
+        ''', (user['id'],))
+        
+        games = []
+        for row in cursor.fetchall():
+            game = {
+                "id": row["id"],
+                "deck_id": row["deck_id"],
+                "deck_name": row["deck_name"],
+                "hero_name": row["hero_name"],
+                "aspect": row["aspect"],
+                "villain_id": row["villain_id"],
+                "villain_name": row["villain_name"],
+                "difficulty": row["difficulty"],
+                "result": row["result"],
+                "played_at": row["played_at"]
+            }
+            games.append(game)
+        
+        conn.close()
+        
+        return {"games": games}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving game configurations: {str(e)}"
+        )
+
+@app.get("/api/game-configurations/stats")
+async def get_game_stats(request: Request):
+    """Obtener estadísticas de partidas del usuario"""
+    try:
+        ensure_game_configurations_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Estadísticas generales
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_games,
+                SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses,
+                SUM(CASE WHEN difficulty = 'normal' THEN 1 ELSE 0 END) as normal_games,
+                SUM(CASE WHEN difficulty = 'expert' THEN 1 ELSE 0 END) as expert_games
+            FROM game_configurations 
+            WHERE user_id = ?
+        ''', (user['id'],))
+        
+        stats_row = cursor.fetchone()
+        
+        # Villanos más jugados
+        cursor.execute('''
+            SELECT 
+                c.card_set as villain_name,
+                COUNT(*) as games_played,
+                SUM(CASE WHEN gc.result = 'win' THEN 1 ELSE 0 END) as wins
+            FROM game_configurations gc
+            JOIN cards c ON gc.villain_id = c.id
+            WHERE gc.user_id = ?
+            GROUP BY c.card_set
+            ORDER BY games_played DESC
+            LIMIT 5
+        ''', (user['id'],))
+        
+        top_villains = []
+        for row in cursor.fetchall():
+            top_villains.append({
+                "villain_name": row["villain_name"],
+                "games_played": row["games_played"],
+                "wins": row["wins"],
+                "win_rate": round((row["wins"] / row["games_played"]) * 100, 1) if row["games_played"] > 0 else 0
+            })
+        
+        # Mazos más usados
+        cursor.execute('''
+            SELECT 
+                d.name as deck_name,
+                d.hero_name,
+                d.aspect,
+                COUNT(*) as games_played,
+                SUM(CASE WHEN gc.result = 'win' THEN 1 ELSE 0 END) as wins
+            FROM game_configurations gc
+            JOIN decks d ON gc.deck_id = d.id
+            WHERE gc.user_id = ?
+            GROUP BY d.id, d.name, d.hero_name, d.aspect
+            ORDER BY games_played DESC
+            LIMIT 5
+        ''', (user['id'],))
+        
+        top_decks = []
+        for row in cursor.fetchall():
+            top_decks.append({
+                "deck_name": row["deck_name"],
+                "hero_name": row["hero_name"],
+                "aspect": row["aspect"],
+                "games_played": row["games_played"],
+                "wins": row["wins"],
+                "win_rate": round((row["wins"] / row["games_played"]) * 100, 1) if row["games_played"] > 0 else 0
+            })
+        
+        conn.close()
+        
+        total_games = stats_row["total_games"] or 0
+        wins = stats_row["wins"] or 0
+        losses = stats_row["losses"] or 0
+        
+        stats = {
+            "total_games": total_games,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round((wins / total_games) * 100, 1) if total_games > 0 else 0,
+            "normal_games": stats_row["normal_games"] or 0,
+            "expert_games": stats_row["expert_games"] or 0,
+            "top_villains": top_villains,
+            "top_decks": top_decks
+        }
+        
+        return {"stats": stats}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving game stats: {str(e)}"
         )
 
 @app.get("/api/decks/{deck_id}")
