@@ -1161,7 +1161,7 @@ async def get_game_configurations(request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Obtener partidas del usuario con información del mazo y villano
+        # Obtener partidas del usuario con información del mazo, villano y creador
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1173,10 +1173,12 @@ async def get_game_configurations(request: Request):
                 d.name as deck_name,
                 d.hero_name,
                 d.aspect,
-                c.card_set as villain_name
+                c.card_set as villain_name,
+                u.name as creator_name
             FROM game_configurations gc
             JOIN decks d ON gc.deck_id = d.id
             JOIN cards c ON gc.villain_id = c.id
+            LEFT JOIN users u ON d.user_id = u.id
             WHERE gc.user_id = ?
             ORDER BY gc.played_at DESC
         ''', (user['id'],))
@@ -1193,7 +1195,8 @@ async def get_game_configurations(request: Request):
                 "villain_name": row["villain_name"],
                 "difficulty": row["difficulty"],
                 "result": row["result"],
-                "played_at": row["played_at"]
+                "played_at": row["played_at"],
+                "creator_name": row["creator_name"]
             }
             games.append(game)
         
@@ -1218,7 +1221,7 @@ async def get_all_game_configurations():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Obtener todas las partidas con información del mazo y villano
+        # Obtener todas las partidas con información del mazo, villano y creador
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1230,10 +1233,13 @@ async def get_all_game_configurations():
                 d.name as deck_name,
                 d.hero_name,
                 d.aspect,
-                c.card_set as villain_name
+                d.user_id,
+                c.card_set as villain_name,
+                u.name as creator_name
             FROM game_configurations gc
             JOIN decks d ON gc.deck_id = d.id
             JOIN cards c ON gc.villain_id = c.id
+            LEFT JOIN users u ON d.user_id = u.id
             ORDER BY gc.played_at DESC
         ''')
         
@@ -1249,7 +1255,8 @@ async def get_all_game_configurations():
                 "villain_name": row["villain_name"],
                 "difficulty": row["difficulty"],
                 "result": row["result"],
-                "played_at": row["played_at"]
+                "played_at": row["played_at"],
+                "creator_name": row["creator_name"]
             }
             games.append(game)
         
