@@ -1209,6 +1209,60 @@ async def get_game_configurations(request: Request):
             detail=f"Error retrieving game configurations: {str(e)}"
         )
 
+@app.get("/api/game-configurations/all")
+async def get_all_game_configurations():
+    """Obtener TODAS las partidas públicas de todos los usuarios. Endpoint público."""
+    try:
+        ensure_game_configurations_table()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener todas las partidas con información del mazo y villano
+        cursor.execute('''
+            SELECT 
+                gc.id,
+                gc.deck_id,
+                gc.difficulty,
+                gc.villain_id,
+                gc.result,
+                gc.played_at,
+                d.name as deck_name,
+                d.hero_name,
+                d.aspect,
+                c.card_set as villain_name
+            FROM game_configurations gc
+            JOIN decks d ON gc.deck_id = d.id
+            JOIN cards c ON gc.villain_id = c.id
+            ORDER BY gc.played_at DESC
+        ''')
+        
+        games = []
+        for row in cursor.fetchall():
+            game = {
+                "id": row["id"],
+                "deck_id": row["deck_id"],
+                "deck_name": row["deck_name"],
+                "hero_name": row["hero_name"],
+                "aspect": row["aspect"],
+                "villain_id": row["villain_id"],
+                "villain_name": row["villain_name"],
+                "difficulty": row["difficulty"],
+                "result": row["result"],
+                "played_at": row["played_at"]
+            }
+            games.append(game)
+        
+        conn.close()
+        
+        return {"games": games}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving all game configurations: {str(e)}"
+        )
+
 @app.get("/api/game-configurations/stats")
 async def get_game_stats(request: Request):
     """Obtener estadísticas de partidas del usuario"""
