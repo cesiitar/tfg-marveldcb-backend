@@ -1875,6 +1875,195 @@ async def create_deck_comment(deck_id: int, comment_data: dict, request: Request
             detail=f"Error creating comment: {str(e)}"
         )
 
+@app.put("/api/comments/{comment_id}")
+async def update_deck_comment(comment_id: int, comment_data: dict, request: Request):
+    """Actualizar un comentario existente. Solo el autor puede editarlo. REQUIERE AUTENTICACIÓN."""
+    try:
+        ensure_deck_comments_table()
+        
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        # Validar datos requeridos
+        comment_text = comment_data.get('comment_text')
+        
+        if not comment_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="comment_text is required"
+            )
+        
+        # Validar que el comentario no esté vacío (trimmed)
+        comment_text = comment_text.strip()
+        if not comment_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="comment_text cannot be empty"
+            )
+        
+        # Validar límite de caracteres (1000 caracteres)
+        MAX_COMMENT_LENGTH = 1000
+        if len(comment_text) > MAX_COMMENT_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"comment_text cannot exceed {MAX_COMMENT_LENGTH} characters"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que el comentario existe y obtener su auth0_id
+        cursor.execute('''
+            SELECT id, auth0_id, deck_id
+            FROM deck_comments
+            WHERE id = ?
+        ''', (comment_id,))
+        
+        comment = cursor.fetchone()
+        
+        if not comment:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Comment not found"
+            )
+        
+        # Verificar que el usuario es el autor del comentario
+        if comment["auth0_id"] != auth0_id:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only edit your own comments"
+            )
+        
+        # Actualizar el comentario
+        cursor.execute('''
+            UPDATE deck_comments
+            SET comment_text = ?,
+                updated_at = datetime('now', 'localtime')
+            WHERE id = ?
+        ''', (comment_text, comment_id))
+        
+        conn.commit()
+        
+        # Obtener el comentario actualizado con nombre del autor
+        cursor.execute('''
+            SELECT 
+                dc.id,
+                dc.deck_id,
+                dc.auth0_id,
+                dc.comment_text,
+                dc.created_at,
+                dc.updated_at,
+                u.name as author_name
+            FROM deck_comments dc
+            LEFT JOIN users u ON dc.auth0_id = u.auth0_id
+            WHERE dc.id = ?
+        ''', (comment_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error retrieving updated comment"
+            )
+        
+        updated_comment = {
+            "id": row["id"],
+            "deck_id": row["deck_id"],
+            "auth0_id": row["auth0_id"],
+            "author_name": row["author_name"],
+            "comment_text": row["comment_text"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"]
+        }
+        
+        conn.close()
+        
+        return {
+            "comment": updated_comment,
+            "message": "Comentario actualizado correctamente"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating comment: {str(e)}"
+        )
+
+@app.delete("/api/comments/{comment_id}")
+async def delete_deck_comment(comment_id: int, request: Request):
+    """Eliminar un comentario. Solo el autor puede eliminarlo. REQUIERE AUTENTICACIÓN."""
+    try:
+        ensure_deck_comments_table()
+        
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que el comentario existe y obtener su auth0_id
+        cursor.execute('''
+            SELECT id, auth0_id
+            FROM deck_comments
+            WHERE id = ?
+        ''', (comment_id,))
+        
+        comment = cursor.fetchone()
+        
+        if not comment:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Comment not found"
+            )
+        
+        # Verificar que el usuario es el autor del comentario
+        if comment["auth0_id"] != auth0_id:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only delete your own comments"
+            )
+        
+        # Eliminar el comentario
+        cursor.execute('''
+            DELETE FROM deck_comments
+            WHERE id = ?
+        ''', (comment_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "message": "Comentario eliminado correctamente"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting comment: {str(e)}"
+        )
+
 # =============================================================================
 # ENDPOINTS PROTEGIDOS (requieren autenticación)
 # =============================================================================
