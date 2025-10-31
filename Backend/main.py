@@ -216,6 +216,40 @@ def ensure_user_favorites_table():
     conn.close()
 
 # =============================================================================
+# UTILIDADES DE ESQUEMA (deck_comments)
+# =============================================================================
+def ensure_deck_comments_table():
+    """Crear la tabla deck_comments si no existe."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Crear la tabla deck_comments
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS deck_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id INTEGER NOT NULL,
+            auth0_id TEXT NOT NULL,
+            comment_text TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT,
+            
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Crear índices para búsquedas rápidas
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_deck_comments_deck_id ON deck_comments(deck_id)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_deck_comments_auth0_id ON deck_comments(auth0_id)
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# =============================================================================
 # UTILIDADES DE ESQUEMA (cards)
 # =============================================================================
 def ensure_cards_columns():
@@ -1661,6 +1695,184 @@ async def toggle_favorite(favorite_data: dict, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
+        )
+
+# =============================================================================
+# ENDPOINTS DE COMENTARIOS
+# =============================================================================
+
+@app.get("/api/decks/{deck_id}/comments")
+async def get_deck_comments(deck_id: int):
+    """Obtener todos los comentarios de un mazo específico. Endpoint público."""
+    try:
+        ensure_deck_comments_table()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que el mazo existe
+        cursor.execute('SELECT id FROM decks WHERE id = ?', (deck_id,))
+        deck = cursor.fetchone()
+        
+        if not deck:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Deck not found"
+            )
+        
+        # Obtener todos los comentarios del mazo con nombre del autor
+        cursor.execute('''
+            SELECT 
+                dc.id,
+                dc.deck_id,
+                dc.auth0_id,
+                dc.comment_text,
+                dc.created_at,
+                dc.updated_at,
+                u.name as author_name
+            FROM deck_comments dc
+            LEFT JOIN users u ON dc.auth0_id = u.auth0_id
+            WHERE dc.deck_id = ?
+            ORDER BY dc.created_at DESC
+        ''', (deck_id,))
+        
+        comments = []
+        for row in cursor.fetchall():
+            comment = {
+                "id": row["id"],
+                "deck_id": row["deck_id"],
+                "auth0_id": row["auth0_id"],
+                "author_name": row["author_name"],
+                "comment_text": row["comment_text"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]
+            }
+            comments.append(comment)
+        
+        conn.close()
+        
+        return {"comments": comments}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving comments: {str(e)}"
+        )
+
+@app.post("/api/decks/{deck_id}/comments", status_code=201)
+async def create_deck_comment(deck_id: int, comment_data: dict, request: Request):
+    """Crear un nuevo comentario en un mazo. REQUIERE AUTENTICACIÓN."""
+    try:
+        ensure_deck_comments_table()
+        
+        auth0_id = request.headers.get('X-Auth0-ID')
+        
+        # Validar autenticación
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        
+        # Validar datos requeridos
+        comment_text = comment_data.get('comment_text')
+        
+        if not comment_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="comment_text is required"
+            )
+        
+        # Validar que el comentario no esté vacío (trimmed)
+        comment_text = comment_text.strip()
+        if not comment_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="comment_text cannot be empty"
+            )
+        
+        # Validar límite de caracteres (1000 caracteres)
+        MAX_COMMENT_LENGTH = 1000
+        if len(comment_text) > MAX_COMMENT_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"comment_text cannot exceed {MAX_COMMENT_LENGTH} characters"
+            )
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que el mazo existe
+        cursor.execute('SELECT id FROM decks WHERE id = ?', (deck_id,))
+        deck = cursor.fetchone()
+        
+        if not deck:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Deck not found"
+            )
+        
+        # Crear el comentario
+        cursor.execute('''
+            INSERT INTO deck_comments (deck_id, auth0_id, comment_text)
+            VALUES (?, ?, ?)
+        ''', (deck_id, auth0_id, comment_text))
+        
+        comment_id = cursor.lastrowid
+        
+        conn.commit()
+        
+        # Obtener el comentario creado con nombre del autor
+        cursor.execute('''
+            SELECT 
+                dc.id,
+                dc.deck_id,
+                dc.auth0_id,
+                dc.comment_text,
+                dc.created_at,
+                dc.updated_at,
+                u.name as author_name
+            FROM deck_comments dc
+            LEFT JOIN users u ON dc.auth0_id = u.auth0_id
+            WHERE dc.id = ?
+        ''', (comment_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error retrieving created comment"
+            )
+        
+        comment = {
+            "id": row["id"],
+            "deck_id": row["deck_id"],
+            "auth0_id": row["auth0_id"],
+            "author_name": row["author_name"],
+            "comment_text": row["comment_text"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"]
+        }
+        
+        conn.close()
+        
+        return {
+            "comment": comment,
+            "message": "Comentario creado correctamente"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating comment: {str(e)}"
         )
 
 # =============================================================================
