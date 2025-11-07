@@ -4,8 +4,17 @@ import sqlite3
 import json
 import re
 from typing import List, Dict, Optional
+import sys
+import os
+
+# Añadir path para importar módulos ML
+sys.path.append(os.path.dirname(__file__))
+from ml.api.recommendations import router as recommendations_router
 
 app = FastAPI(title="MarvelCDB API", version="1.0.0")
+
+# Registrar rutas de recomendaciones
+app.include_router(recommendations_router, prefix="/api", tags=["recommendations"])
 
 def get_user_by_auth0_id(auth0_id: str):
     """Helper function to get user by Auth0 ID"""
