@@ -166,31 +166,63 @@ def create_test_deck(hero: Dict, aspect: str, user_id: int, deck_name: Optional[
         hero_cards = []
     
     # 2. Calcular cuántas cartas adicionales necesitamos del aspecto
-    # El mazo debe tener entre 40 y 50 cartas totales (incluyendo las del héroe)
+    # El mazo debe tener entre 40 y 50 cartas TOTALES (sumando cantidades, no cartas distintas)
     target_total = random.randint(40, 50)
-    needed_cards = max(0, target_total - len(hero_cards))
+    
+    # Calcular el total actual de cartas (sumando cantidades)
+    current_total = sum(card.get('quantity', 1) for card in hero_cards)
+    needed_cards = max(0, target_total - current_total)
     
     # 3. Obtener cartas aleatorias del aspecto para completar el mazo
-    aspect_cards = get_aspect_cards(aspect, num_cards=needed_cards * 2)  # Obtener más de las necesarias
+    aspect_cards = get_aspect_cards(aspect, num_cards=100)  # Obtener muchas cartas para elegir
     
     # 4. Combinar las cartas del héroe con las del aspecto
     all_cards = hero_cards.copy()
+    current_total = sum(card.get('quantity', 1) for card in all_cards)
     
-    # Añadir cartas del aspecto hasta llegar al objetivo
+    # Añadir cartas del aspecto hasta llegar al objetivo (sumando cantidades)
     for card in aspect_cards:
-        if len(all_cards) >= target_total:
+        if current_total >= target_total:
             break
-        all_cards.append(card)
+        
+        card_quantity = card.get('quantity', 1)
+        # Si añadir esta carta no excede el límite, añadirla
+        if current_total + card_quantity <= target_total:
+            all_cards.append(card)
+            current_total += card_quantity
+        # Si añadir esta carta excede el límite, ajustar la cantidad
+        elif current_total < target_total:
+            remaining = target_total - current_total
+            if remaining > 0:
+                card['quantity'] = remaining
+                all_cards.append(card)
+                current_total += remaining
+            break
     
     # Si aún no tenemos suficientes cartas, repetir algunas del aspecto
-    while len(all_cards) < target_total and aspect_cards:
+    while current_total < target_total and aspect_cards:
         for card in aspect_cards:
-            if len(all_cards) >= target_total:
+            if current_total >= target_total:
                 break
-            all_cards.append(card)
+            
+            card_quantity = card.get('quantity', 1)
+            remaining = target_total - current_total
+            
+            if remaining >= card_quantity:
+                # Añadir una copia de la carta
+                new_card = card.copy()
+                all_cards.append(new_card)
+                current_total += card_quantity
+            elif remaining > 0:
+                # Añadir una copia con cantidad ajustada
+                new_card = card.copy()
+                new_card['quantity'] = remaining
+                all_cards.append(new_card)
+                current_total += remaining
+                break
     
-    # Asegurar que tenemos exactamente entre 40 y 50 cartas
-    all_cards = all_cards[:target_total]
+    # Calcular el total final
+    final_total = sum(card.get('quantity', 1) for card in all_cards)
     
     # Generar nombre del mazo si no se proporciona
     if not deck_name:
@@ -215,10 +247,15 @@ def create_test_deck(hero: Dict, aspect: str, user_id: int, deck_name: Optional[
     conn.commit()
     conn.close()
     
+    # Calcular estadísticas
+    hero_cards_count = sum(card.get('quantity', 1) for card in hero_cards)
+    aspect_cards_count = final_total - hero_cards_count
+    distinct_cards = len(all_cards)
+    
     print(f"✅ Mazo creado: ID={deck_id}, Nombre='{deck_name}', Héroe={hero['name']}, Aspecto={aspect}")
-    print(f"   - Cartas del héroe: {len(hero_cards)}")
-    print(f"   - Cartas del aspecto: {len(all_cards) - len(hero_cards)}")
-    print(f"   - Total: {len(all_cards)} cartas")
+    print(f"   - Cartas del héroe: {hero_cards_count} cartas ({len(hero_cards)} distintas)")
+    print(f"   - Cartas del aspecto: {aspect_cards_count} cartas ({distinct_cards - len(hero_cards)} distintas)")
+    print(f"   - Total: {final_total} cartas ({distinct_cards} distintas)")
     return deck_id
 
 def create_test_game_configuration(deck_id: int, villain: Dict, difficulty: str, result: str, user_id: int) -> int:
