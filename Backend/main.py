@@ -743,6 +743,7 @@ async def search_cards(
 async def get_public_decks():
     """Obtener todos los mazos públicos"""
     ensure_decks_columns()
+    ensure_user_favorites_table()
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -752,19 +753,26 @@ async def get_public_decks():
     
     # Incluir mazos legacy donde is_public pueda ser NULL y también mazos de usuario
     # Mostrar todo lo que sea público (1) o legacy (NULL). Todos los mazos creados por usuarios se guardan como públicos.
+    # Incluir conteo de favoritos usando LEFT JOIN con user_favorites
     if 'user_id' in columns:
         cursor.execute('''
-            SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at, user_id
-            FROM decks 
-            WHERE is_public = 1 OR is_public IS NULL
-            ORDER BY created_at DESC
+            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.user_id,
+                   COALESCE(COUNT(uf.id), 0) as favorite_count
+            FROM decks d
+            LEFT JOIN user_favorites uf ON d.id = uf.deck_id
+            WHERE d.is_public = 1 OR d.is_public IS NULL
+            GROUP BY d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.user_id
+            ORDER BY d.created_at DESC
         ''')
     else:
         cursor.execute('''
-            SELECT id, name, description, hero_name, aspect, cards, created_at
-            FROM decks 
-            WHERE is_public = 1 OR is_public IS NULL
-            ORDER BY created_at DESC
+            SELECT d.id, d.name, d.description, d.hero_name, d.aspect, d.cards, d.created_at,
+                   COALESCE(COUNT(uf.id), 0) as favorite_count
+            FROM decks d
+            LEFT JOIN user_favorites uf ON d.id = uf.deck_id
+            WHERE d.is_public = 1 OR d.is_public IS NULL
+            GROUP BY d.id, d.name, d.description, d.hero_name, d.aspect, d.cards, d.created_at
+            ORDER BY d.created_at DESC
         ''')
     
     decks = []
@@ -851,7 +859,8 @@ async def get_public_decks():
             "aspect": row["aspect"],
             "cards": cards_data,
             "created_at": row["created_at"],
-            "creator_name": creator_name
+            "creator_name": creator_name,
+            "favorite_count": row["favorite_count"]
         }
         
         # Añadir información del usuario si existe
@@ -1432,13 +1441,18 @@ async def get_game_stats(request: Request):
 async def get_deck(deck_id: int):
     """Obtener un mazo específico por ID"""
     ensure_decks_columns()
+    ensure_user_favorites_table()
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Incluir conteo de favoritos usando LEFT JOIN con user_favorites
     cursor.execute('''
-        SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at
-        FROM decks 
-        WHERE id = ? AND is_public = 1
+        SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at,
+               COALESCE(COUNT(uf.id), 0) as favorite_count
+        FROM decks d
+        LEFT JOIN user_favorites uf ON d.id = uf.deck_id
+        WHERE d.id = ? AND d.is_public = 1
+        GROUP BY d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at
     ''', (deck_id,))
     
     row = cursor.fetchone()
@@ -1532,7 +1546,8 @@ async def get_deck(deck_id: int):
         "aspect": row["aspect"],
         "cards": cards_data,
         "created_at": row["created_at"],
-        "creator_name": creator_name
+        "creator_name": creator_name,
+        "favorite_count": row["favorite_count"]
     }
     
     print(f"📤 Devolviendo mazo con descripción: '{row['description']}'")
