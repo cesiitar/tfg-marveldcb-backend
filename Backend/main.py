@@ -2202,11 +2202,16 @@ async def get_user_decks(request: Request):
             conn.close()
             return {"decks": []}
         
+        # Obtener mazos del usuario con conteo de favoritos
+        ensure_user_favorites_table()
         cursor.execute('''
-            SELECT id, name, description, hero_name, hero_id, aspect, cards, created_at, is_public
-            FROM decks 
-            WHERE user_id = ?
-            ORDER BY created_at DESC
+            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.is_public,
+                   COALESCE(COUNT(uf.id), 0) as favorite_count
+            FROM decks d
+            LEFT JOIN user_favorites uf ON d.id = uf.deck_id
+            WHERE d.user_id = ?
+            GROUP BY d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.is_public
+            ORDER BY d.created_at DESC
         ''', (user["id"],))
         
         decks = []
@@ -2283,7 +2288,8 @@ async def get_user_decks(request: Request):
                 "cards": cards_data,
                 "created_at": row["created_at"],
                 "isPublic": bool(row["is_public"]),
-                "creator_name": creator_name
+                "creator_name": creator_name,
+                "favorite_count": row["favorite_count"]
             }
             decks.append(deck)
         
@@ -2327,12 +2333,15 @@ async def get_user_favorites(request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Obtener mazos favoritos del usuario
+        # Obtener mazos favoritos del usuario con conteo de favoritos
         cursor.execute('''
-            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at as favorited_at
+            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at as favorited_at,
+                   COALESCE(COUNT(DISTINCT uf2.id), 0) as favorite_count
             FROM decks d
             JOIN user_favorites uf ON d.id = uf.deck_id
+            LEFT JOIN user_favorites uf2 ON d.id = uf2.deck_id
             WHERE uf.user_id = ?
+            GROUP BY d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at
             ORDER BY uf.created_at DESC
         ''', (user["id"],))
         
@@ -2389,7 +2398,8 @@ async def get_user_favorites(request: Request):
                 "aspect": row["aspect"],
                 "cards": cards_data,
                 "created_at": row["created_at"],
-                "favorited_at": row["favorited_at"]
+                "favorited_at": row["favorited_at"],
+                "favorite_count": row["favorite_count"]
             }
             favorites.append(favorite)
         
