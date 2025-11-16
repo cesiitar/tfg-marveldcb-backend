@@ -98,9 +98,9 @@ def get_top_cards_from_winning_decks(df: pd.DataFrame, top_n: int = 30, aspect: 
 
 def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarray, np.ndarray, list]:
     """
-    Prepara features para el modelo SVM, incluyendo información de cartas
+    Prepara features para el modelo SVM usando solo características generales
     
-    Features:
+    Features (NO incluye cartas específicas, solo características agregadas):
     - hero_id (numérico)
     - aspect_encoded (aggression=0, justice=1, leadership=2, protection=3)
     - villain_id (numérico)
@@ -110,7 +110,11 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
     - ally_ratio: Proporción de aliados
     - upgrade_ratio: Proporción de mejoras
     - support_ratio: Proporción de soportes
-    - card_X: ¿Tiene la carta X? (1 o 0) para cada carta top
+    
+    NOTA: NO usamos features binarias de cartas específicas porque:
+    - Las cartas relevantes dependen del villano y aspecto específicos
+    - Hay millones de combinaciones posibles
+    - Las "top cartas" se identifican dinámicamente durante la generación de mazos
     
     Target:
     - result_encoded (loss=0, win=1)
@@ -135,18 +139,10 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
     # Codificar result (win=1, loss=0)
     df['result_encoded'] = df['result'].map({'win': 1, 'loss': 0}).fillna(0)
     
-    # Si no se proporcionan top_cards, calcularlas globalmente
-    # Para entrenamiento, usamos top cartas globales (pero filtradas por aspecto cuando corresponda)
-    if top_cards is None:
-        # Calcular top cartas globales (las más frecuentes en todos los mazos ganadores)
-        # Esto nos da un conjunto base de cartas importantes
-        top_cards = get_top_cards_from_winning_decks(df, top_n=30)
-    
-    # Preparar features de cartas
+    # Preparar features de cartas (SOLO características agregadas, NO cartas específicas)
     features_list = []
     feature_names = ['hero_id', 'aspect_encoded', 'villain_id', 'difficulty_encoded',
                      'avg_cost', 'event_ratio', 'ally_ratio', 'upgrade_ratio', 'support_ratio']
-    feature_names.extend([f'has_card_{card_id}' for card_id in top_cards])
     
     # Obtener información de cartas de la BD para calcular costes y tipos
     db_path = get_db_path()
@@ -165,16 +161,13 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
             row['difficulty_encoded']
         ]
         
-        # Features agregadas de cartas
+        # Features agregadas de cartas (características generales, NO cartas específicas)
         avg_cost = 0.0
         event_count = 0
         ally_count = 0
         upgrade_count = 0
         support_count = 0
         total_cards = 0
-        
-        # Features binarias de cartas top
-        card_features = [0] * len(top_cards)
         
         try:
             deck_cards = json.loads(row['cards']) if row['cards'] else []
@@ -213,11 +206,6 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
                         upgrade_count += quantity
                     elif 'support' in card_type:
                         support_count += quantity
-                    
-                    # Marcar si es una carta top
-                    if card_id in top_cards:
-                        card_idx = top_cards.index(card_id)
-                        card_features[card_idx] = 1
         
         except (json.JSONDecodeError, KeyError):
             pass
@@ -236,14 +224,14 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
             upgrade_ratio = 0.0
             support_ratio = 0.0
         
-        # Combinar todas las features
+        # Combinar todas las features (SOLO características generales)
         all_features = basic_features + [
             avg_cost,
             event_ratio,
             ally_ratio,
             upgrade_ratio,
             support_ratio
-        ] + card_features
+        ]
         
         features_list.append(all_features)
     
@@ -258,8 +246,10 @@ def get_training_data(db_path: str = None, top_cards: list = None) -> Tuple[np.n
     """
     Función principal para obtener datos de entrenamiento
     
+    NOTA: top_cards ya no se usa (se mantiene el parámetro por compatibilidad pero se ignora)
+    
     Returns:
-        X: features (incluyendo información de cartas)
+        X: features (solo características generales, NO cartas específicas)
         y: target (result_encoded: 0=loss, 1=win)
         feature_names: Lista de nombres de features (para debugging)
     """
@@ -268,7 +258,8 @@ def get_training_data(db_path: str = None, top_cards: list = None) -> Tuple[np.n
     if len(df) == 0:
         raise ValueError("No hay datos de partidas en la base de datos")
     
-    X, y, feature_names = prepare_features(df, top_cards)
+    # top_cards ya no se usa - el modelo solo aprende características generales
+    X, y, feature_names = prepare_features(df, top_cards=None)
     
     return X, y, feature_names
 

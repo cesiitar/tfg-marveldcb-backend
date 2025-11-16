@@ -29,12 +29,13 @@ MODEL_PATH = os.path.join(
 
 # Cache del modelo cargado
 _model = None
-_model_data = None  # Cache para el nuevo formato (con top_cards y feature_names)
+_model_data = None  # Cache para el formato del modelo (con model y feature_names)
 
 def load_model():
     """
     Carga el modelo entrenado (con cache)
-    Soporta formato antiguo (solo modelo) y nuevo (diccionario con model, top_cards, feature_names)
+    Soporta formato antiguo (solo modelo) y nuevo (diccionario con model y feature_names)
+    NOTA: Ya no se usa top_cards - las cartas se seleccionan dinámicamente
     """
     global _model, _model_data
     if _model_data is None:
@@ -50,18 +51,116 @@ def load_model():
         else:
             # Formato antiguo (solo el modelo)
             _model = data
-            _model_data = {'model': _model, 'top_cards': None, 'feature_names': None}
+            _model_data = {'model': _model, 'feature_names': None}
     
     return _model_data['model'] if _model_data else _model
 
 def get_model_data():
     """
-    Obtiene los datos completos del modelo (modelo + top_cards + feature_names)
+    Obtiene los datos completos del modelo (modelo + feature_names)
     """
     global _model_data
     if _model_data is None:
         load_model()  # Esto carga _model_data
     return _model_data
+
+def get_average_deck_features(hero_id: int, aspect: str, villain_id: int, difficulty: str) -> List[float]:
+    """
+    Calcula las características agregadas promedio para una combinación hero/aspect/villain/difficulty.
+    Si no hay datos históricos, usa valores por defecto razonables.
+    
+    Returns:
+        Lista con [avg_cost, event_ratio, ally_ratio, upgrade_ratio, support_ratio]
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Buscar mazos ganadores con esta combinación
+    cursor.execute('''
+        SELECT d.cards
+        FROM game_configurations gc
+        JOIN decks d ON gc.deck_id = d.id
+        WHERE gc.villain_id = ?
+            AND gc.difficulty = ?
+            AND gc.result = 'win'
+            AND d.hero_id = ?
+            AND d.aspect = ?
+            AND d.cards IS NOT NULL
+        LIMIT 10
+    ''', (villain_id, difficulty, hero_id, aspect))
+    
+    decks = cursor.fetchall()
+    
+    if not decks:
+        # Si no hay datos, usar valores por defecto razonables
+        conn.close()
+        return [2.0, 0.4, 0.2, 0.2, 0.2]  # avg_cost=2.0, event=40%, ally=20%, upgrade=20%, support=20%
+    
+    # Calcular promedios
+    total_avg_cost = 0.0
+    total_event_ratio = 0.0
+    total_ally_ratio = 0.0
+    total_upgrade_ratio = 0.0
+    total_support_ratio = 0.0
+    valid_decks = 0
+    
+    for deck_row in decks:
+        try:
+            deck_cards = json.loads(deck_row['cards']) if deck_row['cards'] else []
+            if not deck_cards:
+                continue
+            
+            avg_cost = 0.0
+            event_count = 0
+            ally_count = 0
+            upgrade_count = 0
+            support_count = 0
+            total_cards = 0
+            
+            for card in deck_cards:
+                card_id = card.get('card_id')
+                quantity = card.get('quantity', 1)
+                total_cards += quantity
+                
+                if card_id:
+                    cursor.execute('SELECT cost, type FROM cards WHERE id = ?', (card_id,))
+                    card_info = cursor.fetchone()
+                    if card_info:
+                        cost = card_info[0] or 0
+                        card_type = (card_info[1] or '').lower()
+                        avg_cost += cost * quantity
+                        
+                        if 'event' in card_type:
+                            event_count += quantity
+                        elif 'ally' in card_type:
+                            ally_count += quantity
+                        elif 'upgrade' in card_type or 'attachment' in card_type:
+                            upgrade_count += quantity
+                        elif 'support' in card_type:
+                            support_count += quantity
+            
+            if total_cards > 0:
+                total_avg_cost += avg_cost / total_cards
+                total_event_ratio += event_count / total_cards
+                total_ally_ratio += ally_count / total_cards
+                total_upgrade_ratio += upgrade_count / total_cards
+                total_support_ratio += support_count / total_cards
+                valid_decks += 1
+        except:
+            continue
+    
+    conn.close()
+    
+    if valid_decks == 0:
+        return [2.0, 0.4, 0.2, 0.2, 0.2]  # Valores por defecto
+    
+    return [
+        total_avg_cost / valid_decks,
+        total_event_ratio / valid_decks,
+        total_ally_ratio / valid_decks,
+        total_upgrade_ratio / valid_decks,
+        total_support_ratio / valid_decks
+    ]
 
 # Esquemas de datos
 class DeckData(BaseModel):
@@ -192,12 +291,22 @@ async def predict_villain_success(
                 detail=f"Villano con ID {deck_data.villain_id} no encontrado"
             )
         
-        # Preparar features: [hero_id, aspect_encoded, villain_id, difficulty_encoded]
+        # Obtener características agregadas promedio
+        avg_features = get_average_deck_features(
+            deck_data.hero_id, deck_data.aspect, deck_data.villain_id, deck_data.difficulty
+        )
+        
+        # Preparar features: [hero_id, aspect_encoded, villain_id, difficulty_encoded, avg_cost, event_ratio, ally_ratio, upgrade_ratio, support_ratio]
         features = np.array([[
             deck_data.hero_id,
             aspect_encoded,
             deck_data.villain_id,
-            difficulty_encoded
+            difficulty_encoded,
+            avg_features[0],  # avg_cost
+            avg_features[1],  # event_ratio
+            avg_features[2],  # ally_ratio
+            avg_features[3],  # upgrade_ratio
+            avg_features[4]   # support_ratio
         ]])
         
         # Predecir probabilidad
@@ -238,11 +347,21 @@ async def predict_villain_success(
         
         predictions = []
         for villain in villains:
+            # Obtener características agregadas promedio para este villano
+            avg_features = get_average_deck_features(
+                deck_data.hero_id, deck_data.aspect, villain['id'], deck_data.difficulty
+            )
+            
             features = np.array([[
                 deck_data.hero_id,
                 aspect_encoded,
                 villain['id'],
-                difficulty_encoded
+                difficulty_encoded,
+                avg_features[0],  # avg_cost
+                avg_features[1],  # event_ratio
+                avg_features[2],  # ally_ratio
+                avg_features[3],  # upgrade_ratio
+                avg_features[4]   # support_ratio
             ]])
             
             win_prob = model.predict_proba(features)[0][1]
@@ -388,12 +507,20 @@ def get_best_hero_aspect_for_villain(villain_id: int, difficulty: str) -> Option
             win_rate = row["win_rate"]
             total_games = row["total_games"]
             
-            # Preparar features para el SVM: [hero_id, aspect, villain_id, difficulty]
+            # Obtener características agregadas promedio para esta combinación
+            avg_features = get_average_deck_features(hero_id, aspect, villain_id, difficulty)
+            
+            # Preparar features para el SVM: [hero_id, aspect, villain_id, difficulty, avg_cost, event_ratio, ally_ratio, upgrade_ratio, support_ratio]
             features = np.array([[
                 hero_id,
                 aspect_map[aspect],
                 villain_id,
-                difficulty_encoded
+                difficulty_encoded,
+                avg_features[0],  # avg_cost
+                avg_features[1],  # event_ratio
+                avg_features[2],  # ally_ratio
+                avg_features[3],  # upgrade_ratio
+                avg_features[4]   # support_ratio
             ]])
             
             # EL SVM PREDICE - ESTO ES LO ÚNICO QUE IMPORTA
@@ -638,9 +765,11 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
                 decks_with_card = aspect_decks_info.get(card_id, [])
             
             if not decks_with_card:
-                # Si la carta no aparece en ningún mazo, usar probabilidad base
+                # Si la carta no aparece en ningún mazo, usar probabilidad base con características promedio
+                avg_features = get_average_deck_features(hero_id, aspect, villain_id, difficulty)
                 svm_prob = model.predict_proba(np.array([[
-                    hero_id, aspect_map[aspect], villain_id, difficulty_encoded
+                    hero_id, aspect_map[aspect], villain_id, difficulty_encoded,
+                    avg_features[0], avg_features[1], avg_features[2], avg_features[3], avg_features[4]
                 ]]))[0][1]
             else:
                 # Calcular probabilidad promedio según el SVM para mazos que contienen esta carta
@@ -650,11 +779,19 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
                     deck_aspect = deck_info['aspect']
                     deck_aspect_encoded = aspect_map.get(deck_aspect, 0)
                     
+                    # Obtener características promedio para este deck
+                    avg_features = get_average_deck_features(deck_hero_id, deck_aspect, villain_id, difficulty)
+                    
                     features = np.array([[
                         deck_hero_id,
                         deck_aspect_encoded,
                         villain_id,
-                        difficulty_encoded
+                        difficulty_encoded,
+                        avg_features[0],  # avg_cost
+                        avg_features[1],  # event_ratio
+                        avg_features[2],  # ally_ratio
+                        avg_features[3],  # upgrade_ratio
+                        avg_features[4]   # support_ratio
                     ]])
                     prob = model.predict_proba(features)[0][1]
                     svm_probs.append(prob)
@@ -921,11 +1058,19 @@ async def generate_deck_for_villain(
         aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
         difficulty_encoded = 0 if request_data.difficulty == 'normal' else 1
         
+        # Obtener características agregadas promedio para este mazo
+        avg_features = get_average_deck_features(hero_id, aspect, request_data.villain_id, request_data.difficulty)
+        
         features = np.array([[
             hero_id,
             aspect_map[aspect],
             request_data.villain_id,
-            difficulty_encoded
+            difficulty_encoded,
+            avg_features[0],  # avg_cost
+            avg_features[1],  # event_ratio
+            avg_features[2],  # ally_ratio
+            avg_features[3],  # upgrade_ratio
+            avg_features[4]   # support_ratio
         ]])
         
         win_probability = float(model.predict_proba(features)[0][1])

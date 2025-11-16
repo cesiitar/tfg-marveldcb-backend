@@ -6,18 +6,21 @@ import sys
 
 # Añadir path para importar prepare_data
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from data.prepare_data import get_training_data, get_db_path, get_game_data_from_db, get_top_cards_from_winning_decks
+from data.prepare_data import get_training_data, get_db_path
 
 def train_villain_recommender(db_path: str = None, model_path: str = None):
     """
-    Entrena el modelo SVM para predecir probabilidad de victoria (incluyendo información de cartas)
+    Entrena el modelo SVM para predecir probabilidad de victoria usando solo características generales
+    
+    NOTA: El modelo NO usa cartas específicas como features. Las cartas se seleccionan
+    dinámicamente durante la generación de mazos según el villano y aspecto específicos.
     
     Args:
         db_path: Ruta a la base de datos (opcional, usa la predeterminada si no se proporciona)
         model_path: Ruta donde guardar el modelo (opcional)
     
     Returns:
-        Diccionario con: {'model': modelo, 'top_cards': lista, 'feature_names': lista}
+        Diccionario con: {'model': modelo, 'feature_names': lista}
     """
     print("📊 Cargando datos de entrenamiento...")
     
@@ -25,17 +28,8 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         db_path = get_db_path()
     
     try:
-        # Primero obtener los datos para calcular top_cards
-        df = get_game_data_from_db(db_path)
-        if len(df) == 0:
-            raise ValueError("No hay datos de partidas en la base de datos")
-        
-        print("🔍 Identificando cartas más importantes...")
-        top_cards = get_top_cards_from_winning_decks(df, top_n=30)
-        print(f"   ✅ Identificadas {len(top_cards)} cartas top")
-        
-        # Ahora obtener datos de entrenamiento con las top_cards
-        X, y, feature_names = get_training_data(db_path, top_cards=top_cards)
+        # Obtener datos de entrenamiento (sin top_cards - ya no se usan)
+        X, y, feature_names = get_training_data(db_path, top_cards=None)
     except ValueError as e:
         print(f"❌ Error: {e}")
         return None
@@ -45,7 +39,7 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         return None
     
     print(f"✅ Datos cargados: {len(X)} partidas")
-    print(f"   - Features: {len(feature_names)} (4 básicas + 5 agregadas + {len(top_cards)} cartas top)")
+    print(f"   - Features: {len(feature_names)} (4 básicas + 5 características agregadas)")
     print(f"   - Victorias: {sum(y)} ({sum(y)/len(y)*100:.1f}%)")
     print(f"   - Derrotas: {len(y)-sum(y)} ({(len(y)-sum(y))/len(y)*100:.1f}%)")
     
@@ -54,7 +48,7 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
-    print("🤖 Entrenando modelo SVM con información de cartas...")
+    print("🤖 Entrenando modelo SVM con características generales...")
     model = SVC(
         probability=True,  # Necesario para obtener probabilidades
         kernel='rbf',      # Kernel radial (funciona bien para este tipo de datos)
@@ -77,10 +71,9 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, 'villain_svm_model.pkl')
     
-    # Guardar modelo + top_cards + feature_names
+    # Guardar modelo + feature_names (NO top_cards - se calculan dinámicamente)
     model_data = {
         'model': model,
-        'top_cards': top_cards,
         'feature_names': feature_names
     }
     
@@ -88,7 +81,8 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         pickle.dump(model_data, f)
     
     print(f"💾 Modelo guardado en: {model_path}")
-    print(f"   - Incluye {len(top_cards)} cartas top para predicciones")
+    print(f"   - Usa {len(feature_names)} características generales")
+    print(f"   - Las cartas se seleccionan dinámicamente según villano y aspecto")
     
     return model_data
 
