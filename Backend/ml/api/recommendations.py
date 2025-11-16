@@ -29,18 +29,39 @@ MODEL_PATH = os.path.join(
 
 # Cache del modelo cargado
 _model = None
+_model_data = None  # Cache para el nuevo formato (con top_cards y feature_names)
 
 def load_model():
     """
     Carga el modelo entrenado (con cache)
+    Soporta formato antiguo (solo modelo) y nuevo (diccionario con model, top_cards, feature_names)
     """
-    global _model
-    if _model is None:
+    global _model, _model_data
+    if _model_data is None:
         if not os.path.exists(MODEL_PATH):
             return None
         with open(MODEL_PATH, 'rb') as f:
-            _model = pickle.load(f)
-    return _model
+            data = pickle.load(f)
+        
+        # Si es el nuevo formato (diccionario)
+        if isinstance(data, dict) and 'model' in data:
+            _model_data = data
+            _model = data['model']
+        else:
+            # Formato antiguo (solo el modelo)
+            _model = data
+            _model_data = {'model': _model, 'top_cards': None, 'feature_names': None}
+    
+    return _model_data['model'] if _model_data else _model
+
+def get_model_data():
+    """
+    Obtiene los datos completos del modelo (modelo + top_cards + feature_names)
+    """
+    global _model_data
+    if _model_data is None:
+        load_model()  # Esto carga _model_data
+    return _model_data
 
 # Esquemas de datos
 class DeckData(BaseModel):
@@ -462,7 +483,10 @@ def get_hero_specific_cards(hero_id: int) -> List[dict]:
                 "card_id": row["id"],
                 "card_name": row["name"],
                 "card_set": row["card_set"] or hero_pack_name or "Unknown",
-                "quantity": quantity
+                "quantity": quantity,
+                "type": row["type"],
+                "clase": row["aspect"] or "hero",
+                "set": hero_pack_name or "Unknown"
             })
         
         conn.close()
@@ -473,113 +497,240 @@ def get_hero_specific_cards(hero_id: int) -> List[dict]:
 
 def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, difficulty: str, hero_id: int) -> List[dict]:
     """
-    Obtiene cartas del aspecto basándose en qué cartas aparecen más en mazos ganadores
-    contra el villano especificado. Si no hay datos históricos, usa cartas aleatorias del aspecto.
+    El SVM (IA) decide 100% qué cartas elegir, igual que con los héroes.
+    
+    CÓMO FUNCIONA (100% SVM):
+    1. Obtener todas las cartas candidatas (del aspecto o básicas) que aparecen en mazos ganadores
+    2. Para cada carta, buscar en qué mazos aparece (contra este villano)
+    3. Usar el SVM para predecir la probabilidad de victoria de esos mazos
+    4. El SVM decide 100% - seleccionar las cartas que aparecen en mazos con mayor probabilidad según el SVM
+    
+    CARTAS DEL ASPECTO: Buscar en mazos ganadores con ese aspecto (diferentes héroes)
+    CARTAS BÁSICAS: Buscar en TODOS los mazos ganadores (cualquier aspecto/héroe)
     """
+    model = load_model()
+    if not model:
+        return get_aspect_cards_fallback(aspect, needed_cards)
+    
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Obtener mazos ganadores contra este villano con el mismo héroe y aspecto
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
+        difficulty_encoded = 0 if difficulty == 'normal' else 1
+        
+        print(f"🤖 SVM (IA) analizando cartas candidatas para {aspect} contra este villano...")
+        
+        # 1. Obtener todas las cartas candidatas (del aspecto o básicas) que aparecen en mazos ganadores
+        # CARTAS DEL ASPECTO: de mazos ganadores con ese aspecto
         cursor.execute('''
-            SELECT d.cards
+            SELECT d.id, d.cards, d.hero_id, d.aspect
             FROM game_configurations gc
             JOIN decks d ON gc.deck_id = d.id
             WHERE gc.villain_id = ?
                 AND gc.difficulty = ?
                 AND gc.result = 'win'
                 AND d.aspect = ?
-                AND d.hero_id = ?
-        ''', (villain_id, difficulty, aspect, hero_id))
+                AND d.cards IS NOT NULL
+        ''', (villain_id, difficulty, aspect))
         
-        # Contar qué cartas aparecen más frecuentemente en mazos ganadores
-        card_counts = {}  # {card_id: {'count': int, 'total_quantity': int, 'name': str, 'card_set': str, 'deck_limit': int}}
+        aspect_winning_decks = cursor.fetchall()
         
-        for row in cursor.fetchall():
+        # CARTAS BÁSICAS: de TODOS los mazos ganadores
+        cursor.execute('''
+            SELECT d.id, d.cards, d.hero_id, d.aspect
+            FROM game_configurations gc
+            JOIN decks d ON gc.deck_id = d.id
+            WHERE gc.villain_id = ?
+                AND gc.difficulty = ?
+                AND gc.result = 'win'
+                AND d.cards IS NOT NULL
+        ''', (villain_id, difficulty))
+        
+        all_winning_decks = cursor.fetchall()
+        
+        # Extraer cartas únicas del aspecto
+        aspect_card_ids = set()
+        aspect_decks_info = {}  # {card_id: [{'hero_id': int, 'aspect': str}, ...]}
+        
+        for deck_row in aspect_winning_decks:
             try:
-                deck_cards = json.loads(row["cards"]) if row["cards"] else []
+                deck_cards = json.loads(deck_row['cards']) if deck_row['cards'] else []
                 for card in deck_cards:
-                    card_id = card.get("card_id")
-                    if not card_id:
-                        continue
-                    
-                    # Verificar que la carta pertenece al aspecto correcto O es básica
-                    cursor.execute('''
-                        SELECT id, name, aspect, pack_name, deck_limit
-                        FROM cards
-                        WHERE id = ? 
-                            AND (aspect = ? OR aspect = '' OR aspect IS NULL OR aspect = 'basic')
-                            AND type != 'alter_ego'
-                            AND type != 'alter-ego'
-                            AND type != 'hero'
-                            AND type != 'villain'
-                    ''', (card_id, aspect))
-                    
-                    card_info = cursor.fetchone()
-                    if not card_info:
-                        continue
-                    
-                    quantity = card.get("quantity", 1)
-                    
-                    if card_id not in card_counts:
-                        card_counts[card_id] = {
-                            'count': 0,
-                            'total_quantity': 0,
-                            'name': card_info["name"],
-                            'card_set': card_info["pack_name"] or "Unknown",
-                            'deck_limit': card_info["deck_limit"] or 3
-                        }
-                    
-                    card_counts[card_id]['count'] += 1
-                    card_counts[card_id]['total_quantity'] += quantity
-            except (json.JSONDecodeError, KeyError) as e:
+                    card_id = card.get('card_id')
+                    if card_id:
+                        aspect_card_ids.add(card_id)
+                        if card_id not in aspect_decks_info:
+                            aspect_decks_info[card_id] = []
+                        aspect_decks_info[card_id].append({
+                            'hero_id': deck_row['hero_id'],
+                            'aspect': deck_row['aspect']
+                        })
+            except:
                 continue
         
-        # Ordenar cartas por frecuencia en mazos ganadores
+        # Extraer cartas básicas únicas
+        basic_card_ids = set()
+        basic_decks_info = {}  # {card_id: [{'hero_id': int, 'aspect': str}, ...]}
+        
+        for deck_row in all_winning_decks:
+            try:
+                deck_cards = json.loads(deck_row['cards']) if deck_row['cards'] else []
+                for card in deck_cards:
+                    card_id = card.get('card_id')
+                    if card_id:
+                        # Verificar que es básica
+                        cursor.execute('''
+                            SELECT aspect FROM cards WHERE id = ?
+                        ''', (card_id,))
+                        card_aspect_row = cursor.fetchone()
+                        if card_aspect_row and (not card_aspect_row['aspect'] or card_aspect_row['aspect'] == 'basic'):
+                            basic_card_ids.add(card_id)
+                            if card_id not in basic_decks_info:
+                                basic_decks_info[card_id] = []
+                            basic_decks_info[card_id].append({
+                                'hero_id': deck_row['hero_id'],
+                                'aspect': deck_row['aspect']
+                            })
+            except:
+                continue
+        
+        # Obtener información de las cartas
+        all_candidate_cards = []
+        
+        if aspect_card_ids:
+            placeholders = ','.join(['?'] * len(aspect_card_ids))
+            cursor.execute(f'''
+                SELECT id, name, aspect, pack_name, deck_limit, type, cost
+                FROM cards
+                WHERE id IN ({placeholders})
+                    AND aspect = ?
+            ''', list(aspect_card_ids) + [aspect])
+            all_candidate_cards.extend(cursor.fetchall())
+        
+        if basic_card_ids:
+            placeholders = ','.join(['?'] * len(basic_card_ids))
+            cursor.execute(f'''
+                SELECT id, name, aspect, pack_name, deck_limit, type, cost
+                FROM cards
+                WHERE id IN ({placeholders})
+                    AND (aspect = '' OR aspect IS NULL OR aspect = 'basic')
+            ''', list(basic_card_ids))
+            all_candidate_cards.extend(cursor.fetchall())
+        
+        if not all_candidate_cards:
+            conn.close()
+            return get_aspect_cards_fallback(aspect, needed_cards)
+        
+        print(f"   📊 Encontradas {len(aspect_card_ids)} cartas del aspecto y {len(basic_card_ids)} básicas")
+        
+        # 2. Para cada carta, usar el SVM para predecir probabilidad
+        card_scores = {}  # {card_id: {'svm_prob': float, 'name': str, 'card_set': str, 'deck_limit': int, 'type': str, 'aspect': str}}
+        
+        for card_row in all_candidate_cards:
+            card_id = card_row['id']
+            card_aspect = card_row['aspect'] or 'basic'
+            
+            # Obtener mazos que contienen esta carta
+            if card_aspect == 'basic':
+                decks_with_card = basic_decks_info.get(card_id, [])
+            else:
+                decks_with_card = aspect_decks_info.get(card_id, [])
+            
+            if not decks_with_card:
+                # Si la carta no aparece en ningún mazo, usar probabilidad base
+                svm_prob = model.predict_proba(np.array([[
+                    hero_id, aspect_map[aspect], villain_id, difficulty_encoded
+                ]]))[0][1]
+            else:
+                # Calcular probabilidad promedio según el SVM para mazos que contienen esta carta
+                svm_probs = []
+                for deck_info in decks_with_card:
+                    deck_hero_id = deck_info['hero_id']
+                    deck_aspect = deck_info['aspect']
+                    deck_aspect_encoded = aspect_map.get(deck_aspect, 0)
+                    
+                    features = np.array([[
+                        deck_hero_id,
+                        deck_aspect_encoded,
+                        villain_id,
+                        difficulty_encoded
+                    ]])
+                    prob = model.predict_proba(features)[0][1]
+                    svm_probs.append(prob)
+                
+                svm_prob = sum(svm_probs) / len(svm_probs) if svm_probs else 0.0
+            
+            card_scores[card_id] = {
+                'svm_prob': svm_prob,
+                'name': card_row['name'],
+                'card_set': card_row['pack_name'] or "Unknown",
+                'deck_limit': card_row['deck_limit'] or 3,
+                'type': card_row['type'],
+                'aspect': card_aspect
+            }
+        
+        # 3. Ordenar cartas por probabilidad del SVM (mayor a menor) - EL SVM DECIDE 100%
         sorted_cards = sorted(
-            card_counts.items(),
-            key=lambda x: (x[1]['count'], x[1]['total_quantity']),
+            card_scores.items(),
+            key=lambda x: x[1]['svm_prob'],
             reverse=True
         )
         
-        # Seleccionar las cartas más frecuentes
-        winning_cards = []
-        for card_id, card_data in sorted_cards[:needed_cards * 2]:  # Obtener más de las necesarias
-            deck_limit = card_data['deck_limit']
-            # Usar la cantidad promedio que aparece en mazos ganadores, pero limitada por deck_limit
-            avg_quantity = max(1, min(3, card_data['total_quantity'] // max(1, card_data['count'])))
-            quantity = min(deck_limit, avg_quantity)
+        # 4. Seleccionar las cartas con mayor probabilidad según el SVM
+        selected_cards = []
+        current_total = 0
+        
+        for card_id, card_data in sorted_cards:
+            if current_total >= needed_cards:
+                break
             
-            winning_cards.append({
-                "card_id": card_id,
-                "card_name": card_data['name'],
-                "card_set": card_data['card_set'],
-                "quantity": quantity
-            })
+            deck_limit = card_data['deck_limit']
+            # Cantidad basada en probabilidad del SVM (mayor probabilidad = más copias)
+            if card_data['svm_prob'] > 0.7:
+                quantity = min(3, deck_limit)
+            elif card_data['svm_prob'] > 0.5:
+                quantity = min(2, deck_limit)
+            else:
+                quantity = 1
+            
+            quantity = min(quantity, needed_cards - current_total)
+            
+            if quantity > 0:
+                selected_cards.append({
+                    "card_id": card_id,
+                    "card_name": card_data['name'],
+                    "card_set": card_data['card_set'],
+                    "quantity": quantity,
+                    "type": card_data['type'],
+                    "clase": card_data['aspect'],
+                    "set": card_data['card_set']
+                })
+                current_total += quantity
         
-        # Si tenemos suficientes cartas de mazos ganadores, usarlas
-        if len(winning_cards) >= needed_cards:
-            # Ajustar cantidades para llegar exactamente a needed_cards
-            selected_cards = []
-            current_total = 0
-            for card in winning_cards:
-                if current_total >= needed_cards:
-                    break
-                card_quantity = min(card["quantity"], needed_cards - current_total)
-                if card_quantity > 0:
-                    card["quantity"] = card_quantity
-                    selected_cards.append(card)
-                    current_total += card_quantity
-            conn.close()
-            return selected_cards
+        conn.close()
         
-        # Si no hay suficientes cartas de mazos ganadores, completar con cartas aleatorias del aspecto
-        used_card_ids = [card["card_id"] for card in winning_cards]
-        placeholders = ','.join(['?'] * len(used_card_ids)) if used_card_ids else 'NULL'
+        if len(selected_cards) < needed_cards:
+            additional = get_aspect_cards_fallback(aspect, needed_cards - current_total)
+            selected_cards.extend(additional)
         
-        # Obtener cartas del aspecto Y cartas básicas
-        # Las cartas básicas siempre se pueden meter en cualquier mazo
-        query = f'''
+        print(f"✅ SVM (IA) seleccionó {len(selected_cards)} cartas (100% decisión del SVM)")
+        return selected_cards[:needed_cards] if len(selected_cards) > needed_cards else selected_cards
+        
+    except Exception as e:
+        print(f"Error obteniendo cartas con SVM: {e}")
+        import traceback
+        traceback.print_exc()
+        return get_aspect_cards_fallback(aspect, needed_cards)
+
+def get_aspect_cards_fallback(aspect: str, needed_cards: int) -> List[dict]:
+    """
+    Función fallback para obtener cartas aleatorias del aspecto si el SVM falla
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
             SELECT id, name, cost, type, aspect, pack_name, quantity, deck_limit
             FROM cards 
             WHERE (aspect = ? OR aspect = '' OR aspect IS NULL OR aspect = 'basic')
@@ -587,35 +738,23 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
             AND type != 'alter-ego'
             AND type != 'hero'
             AND type != 'villain'
-            {'AND id NOT IN (' + placeholders + ')' if used_card_ids else ''}
             ORDER BY 
                 CASE 
-                    WHEN aspect = ? THEN 0  -- Priorizar cartas del aspecto
-                    WHEN aspect = '' OR aspect IS NULL OR aspect = 'basic' THEN 1  -- Luego básicas
+                    WHEN aspect = ? THEN 0
+                    WHEN aspect = '' OR aspect IS NULL OR aspect = 'basic' THEN 1
                     ELSE 2
                 END,
                 RANDOM()
             LIMIT ?
-        '''
+        ''', (aspect, aspect, needed_cards * 3))
         
-        params = [aspect, aspect]  # aspect aparece dos veces: una para WHERE y otra para CASE
-        if used_card_ids:
-            params.extend(used_card_ids)
-        params.append(needed_cards * 3)  # Obtener más cartas para tener opciones
-        
-        cursor.execute(query, params)
-        
-        cards = winning_cards.copy()
-        current_total = sum(card.get("quantity", 1) for card in cards)
+        cards = []
+        current_total = 0
         target_total = needed_cards
         
         for row in cursor.fetchall():
             if current_total >= target_total:
                 break
-            
-            # Verificar que no esté ya en la lista
-            if any(card["card_id"] == row["id"] for card in cards):
-                continue
             
             deck_limit = row["deck_limit"] or 3
             quantity = min(random.randint(1, min(deck_limit, 3)), target_total - current_total)
@@ -625,63 +764,18 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
                     "card_id": row["id"],
                     "card_name": row["name"],
                     "card_set": row["pack_name"] or "Unknown",
-                    "quantity": quantity
+                    "quantity": quantity,
+                    "type": row["type"],
+                    "clase": row["aspect"] or 'basic',
+                    "set": row["pack_name"] or "Unknown"
                 })
                 current_total += quantity
         
         conn.close()
         return cards
     except Exception as e:
-        print(f"Error obteniendo cartas del aspecto (usando fallback): {e}")
-        # Fallback: obtener cartas aleatorias del aspecto
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            # Fallback: obtener cartas del aspecto Y básicas
-            # Priorizar cartas del aspecto, luego básicas
-            cursor.execute('''
-                SELECT id, name, cost, type, aspect, pack_name, quantity, deck_limit
-                FROM cards 
-                WHERE (aspect = ? OR aspect = '' OR aspect IS NULL OR aspect = 'basic')
-                AND type != 'alter_ego'
-                AND type != 'alter-ego'
-                AND type != 'hero'
-                AND type != 'villain'
-                ORDER BY 
-                    CASE 
-                        WHEN aspect = ? THEN 0  -- Priorizar cartas del aspecto
-                        WHEN aspect = '' OR aspect IS NULL OR aspect = 'basic' THEN 1  -- Luego básicas
-                        ELSE 2
-                    END,
-                    RANDOM()
-                LIMIT ?
-            ''', (aspect, aspect, needed_cards * 3))
-            
-            cards = []
-            current_total = 0
-            target_total = needed_cards
-            
-            for row in cursor.fetchall():
-                if current_total >= target_total:
-                    break
-                
-                deck_limit = row["deck_limit"] or 3
-                quantity = min(random.randint(1, min(deck_limit, 3)), target_total - current_total)
-                
-                if quantity > 0:
-                    cards.append({
-                        "card_id": row["id"],
-                        "card_name": row["name"],
-                        "card_set": row["pack_name"] or "Unknown",
-                        "quantity": quantity
-                    })
-                    current_total += quantity
-            
-            conn.close()
-            return cards
-        except Exception as e2:
-            print(f"Error en fallback: {e2}")
-            return []
+        print(f"Error en fallback: {e}")
+        return []
 
 def get_hero_name(hero_id: int) -> Optional[str]:
     """Obtiene el nombre del héroe por su ID"""
@@ -820,6 +914,23 @@ async def generate_deck_for_villain(
                 all_cards.append(card)
                 final_total += card_quantity
     
+    # Calcular probabilidad de victoria del mazo completo usando el SVM
+    model = load_model()
+    win_probability = None
+    if model:
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
+        difficulty_encoded = 0 if request_data.difficulty == 'normal' else 1
+        
+        features = np.array([[
+            hero_id,
+            aspect_map[aspect],
+            request_data.villain_id,
+            difficulty_encoded
+        ]])
+        
+        win_probability = float(model.predict_proba(features)[0][1])
+        print(f"🎯 Probabilidad de victoria del mazo (SVM): {win_probability:.2%}")
+    
     # Generar nombre y descripción del mazo
     difficulty_text = "normal" if request_data.difficulty == "normal" else "experto"
     deck_name = f"Mazo optimizado para {villain_name}"
@@ -837,11 +948,13 @@ async def generate_deck_for_villain(
         "creator_name": None,
         "created_at": None,
         "updated_at": None,
-        "favorite_count": 0
+        "favorite_count": 0,
+        "win_probability": win_probability  # Probabilidad de victoria según el SVM
     }
     
     return {
         "deck": deck,
-        "message": "Mazo generado exitosamente"
+        "message": "Mazo generado exitosamente",
+        "win_probability": win_probability  # También en el nivel superior para fácil acceso
     }
 

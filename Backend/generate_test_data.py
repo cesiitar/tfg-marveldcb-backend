@@ -115,15 +115,15 @@ def get_hero_specific_cards(hero_id: int) -> List[Dict]:
 
 def get_aspect_cards(aspect: str, num_cards: int = 40) -> List[Dict]:
     """
-    Obtener cartas aleatorias del aspecto especificado
-    Usa la misma lógica que el endpoint GET /api/cards/aspect/{aspect}
-    pero filtra para excluir alter_ego, hero, villain y limita la cantidad
+    Obtener cartas aleatorias del aspecto especificado Y cartas básicas
+    Las cartas básicas siempre se pueden meter en cualquier mazo
+    Mezcla 70% cartas del aspecto y 30% cartas básicas
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener cartas del aspecto especificado (excluyendo alter_ego, hero, villain)
-    # Usa la misma lógica que get_cards_by_aspect pero con filtros adicionales
+    # Obtener cartas del aspecto (70% aproximadamente)
+    aspect_count = int(num_cards * 0.7)
     cursor.execute('''
         SELECT id, name, cost, type, aspect, pack_name, quantity, deck_limit
         FROM cards 
@@ -134,24 +134,50 @@ def get_aspect_cards(aspect: str, num_cards: int = 40) -> List[Dict]:
         AND type != 'villain'
         ORDER BY RANDOM()
         LIMIT ?
-    ''', (aspect, num_cards))
+    ''', (aspect, aspect_count))
     
-    cards = []
+    aspect_cards = []
     for row in cursor.fetchall():
-        # Usar deck_limit para determinar la cantidad máxima
         deck_limit = row['deck_limit'] or 3
-        # La cantidad por defecto es 1, pero puede ser hasta deck_limit
-        quantity = min(random.randint(1, deck_limit), 3)  # Máximo 3 por carta
-        
-        cards.append({
+        quantity = min(random.randint(1, deck_limit), 3)
+        aspect_cards.append({
             'card_id': row['id'],
             'card_name': row['name'],
-            'card_set': row['pack_name'] or 'Unknown',  # Usar pack_name como set
+            'card_set': row['pack_name'] or 'Unknown',
             'quantity': quantity
         })
     
+    # Obtener cartas básicas (30% aproximadamente)
+    basic_count = num_cards - len(aspect_cards)
+    cursor.execute('''
+        SELECT id, name, cost, type, aspect, pack_name, quantity, deck_limit
+        FROM cards 
+        WHERE (aspect = '' OR aspect IS NULL OR aspect = 'basic')
+        AND type != 'alter_ego'
+        AND type != 'alter-ego'
+        AND type != 'hero'
+        AND type != 'villain'
+        ORDER BY RANDOM()
+        LIMIT ?
+    ''', (basic_count,))
+    
+    basic_cards = []
+    for row in cursor.fetchall():
+        deck_limit = row['deck_limit'] or 3
+        quantity = min(random.randint(1, deck_limit), 3)
+        basic_cards.append({
+            'card_id': row['id'],
+            'card_name': row['name'],
+            'card_set': row['pack_name'] or 'Unknown',
+            'quantity': quantity
+        })
+    
+    # Mezclar las cartas del aspecto con las básicas
+    all_cards = aspect_cards + basic_cards
+    random.shuffle(all_cards)
+    
     conn.close()
-    return cards
+    return all_cards
 
 def create_test_deck(hero: Dict, aspect: str, user_id: int, deck_name: Optional[str] = None) -> int:
     """Crear un mazo de prueba"""
@@ -173,14 +199,15 @@ def create_test_deck(hero: Dict, aspect: str, user_id: int, deck_name: Optional[
     current_total = sum(card.get('quantity', 1) for card in hero_cards)
     needed_cards = max(0, target_total - current_total)
     
-    # 3. Obtener cartas aleatorias del aspecto para completar el mazo
+    # 3. Obtener cartas aleatorias del aspecto Y básicas para completar el mazo
+    # La función get_aspect_cards ya mezcla 70% aspecto y 30% básicas
     aspect_cards = get_aspect_cards(aspect, num_cards=100)  # Obtener muchas cartas para elegir
     
-    # 4. Combinar las cartas del héroe con las del aspecto
+    # 4. Combinar las cartas del héroe con las del aspecto/básicas
     all_cards = hero_cards.copy()
     current_total = sum(card.get('quantity', 1) for card in all_cards)
     
-    # Añadir cartas del aspecto hasta llegar al objetivo (sumando cantidades)
+    # Añadir cartas del aspecto/básicas hasta llegar al objetivo (sumando cantidades)
     for card in aspect_cards:
         if current_total >= target_total:
             break
