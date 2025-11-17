@@ -923,6 +923,26 @@ async def create_deck(deck_data: dict, request: Request):
         
         print(f"✅ Aspect válido: {aspect}")
         
+        # Validar nombre duplicado (GLOBAL - case-insensitive, trim)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        deck_name = deck_data.get('name', '').strip()
+        cursor.execute('''
+            SELECT COUNT(*) 
+            FROM decks 
+            WHERE LOWER(TRIM(name)) = LOWER(?)
+        ''', (deck_name,))
+        duplicate_count = cursor.fetchone()[0]
+        
+        if duplicate_count > 0:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un mazo con el nombre '{deck_name}'. Por favor, elige otro nombre."
+            )
+        
+        print(f"✅ Nombre del mazo único: '{deck_name}'")
+        
         # Validar que el mazo tenga entre 40 y 50 cartas (sin contar el héroe)
         cards = deck_data.get('cards', [])
         print(f"🔢 Validando {len(cards)} cartas...")
@@ -950,8 +970,7 @@ async def create_deck(deck_data: dict, request: Request):
         print(f"✅ Mazo tiene {total_cards} cartas (válido)")
         
         # Validar que todas las cartas existan en la base de datos
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # (conn y cursor ya están abiertos desde la validación de nombre duplicado)
         
         print(f"🔍 Validando existencia de cartas y asignando clases...")
         for i, card in enumerate(cards):
@@ -2464,6 +2483,25 @@ async def update_deck(deck_id: int, deck_data: dict, request: Request):
             )
         
         print(f"✅ Mazo encontrado: ID={deck[0]}, User_ID={deck[1]}")
+        
+        # Validar nombre duplicado (GLOBAL - case-insensitive, trim, excluyendo mazo actual)
+        deck_name = deck_data.get('name', '').strip()
+        cursor.execute('''
+            SELECT COUNT(*) 
+            FROM decks 
+            WHERE LOWER(TRIM(name)) = LOWER(?)
+              AND id != ?
+        ''', (deck_name, deck_id))
+        duplicate_count = cursor.fetchone()[0]
+        
+        if duplicate_count > 0:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un mazo con el nombre '{deck_name}'. Por favor, elige otro nombre."
+            )
+        
+        print(f"✅ Nombre del mazo único: '{deck_name}'")
         
         # Validar datos del mazo
         required_fields = ['name', 'hero_name', 'cards']
