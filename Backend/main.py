@@ -913,12 +913,12 @@ async def create_deck(deck_data: dict, request: Request):
             )
         # Validar aspect permitido
         aspect = deck_data.get('aspect')
-        allowed_aspects = {"aggression", "justice", "leadership", "protection"}
+        allowed_aspects = {"aggression", "justice", "leadership", "protection", "pool"}
         if aspect not in allowed_aspects:
             print(f"❌ Aspect inválido: {aspect}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid aspect. Allowed: aggression, justice, leadership, protection"
+                detail="Invalid aspect. Allowed: aggression, justice, leadership, protection, pool"
             )
         
         print(f"✅ Aspect válido: {aspect}")

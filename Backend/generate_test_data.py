@@ -367,7 +367,7 @@ def generate_test_data(
     print("📥 Obteniendo datos de la base de datos...")
     heroes = get_heroes()
     villains = get_villains()
-    aspects = ['aggression', 'justice', 'leadership', 'protection']
+    aspects = ['aggression', 'justice', 'leadership', 'protection', 'pool']
     difficulties = ['normal', 'expert']
     
     if not heroes:

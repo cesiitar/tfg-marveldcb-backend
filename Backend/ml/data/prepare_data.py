@@ -102,7 +102,7 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
     
     Features (NO incluye cartas específicas, solo características agregadas):
     - hero_id (numérico)
-    - aspect_encoded (aggression=0, justice=1, leadership=2, protection=3)
+    - aspect_encoded (aggression=0, justice=1, leadership=2, protection=3, pool=4)
     - villain_id (numérico)
     - difficulty_encoded (normal=0, expert=1)
     - avg_cost: Coste promedio de las cartas del mazo
@@ -129,7 +129,8 @@ def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarr
         'aggression': 0,
         'justice': 1,
         'leadership': 2,
-        'protection': 3
+        'protection': 3,
+        'pool': 4
     }
     df['aspect_encoded'] = df['aspect'].map(aspect_map).fillna(0)
     

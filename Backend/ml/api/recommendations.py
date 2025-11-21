@@ -165,7 +165,7 @@ def get_average_deck_features(hero_id: int, aspect: str, villain_id: int, diffic
 # Esquemas de datos
 class DeckData(BaseModel):
     hero_id: int
-    aspect: str  # 'aggression', 'justice', 'leadership', 'protection'
+    aspect: str  # 'aggression', 'justice', 'leadership', 'protection', 'pool'
     cards: List[dict]  # Lista de cartas (por ahora no se usa, pero está para futuro)
     villain_id: Optional[int] = None  # Si se proporciona, predice solo para ese villano
     difficulty: Optional[str] = 'normal'  # 'normal' o 'expert'
@@ -256,7 +256,7 @@ async def predict_villain_success(
         )
     
     # Validar aspect
-    valid_aspects = ['aggression', 'justice', 'leadership', 'protection']
+    valid_aspects = ['aggression', 'justice', 'leadership', 'protection', 'pool']
     if deck_data.aspect not in valid_aspects:
         raise HTTPException(
             status_code=400,
@@ -275,7 +275,8 @@ async def predict_villain_success(
         'aggression': 0,
         'justice': 1,
         'leadership': 2,
-        'protection': 3
+        'protection': 3,
+        'pool': 4
     }
     aspect_encoded = aspect_map[deck_data.aspect]
     
@@ -492,7 +493,7 @@ def get_best_hero_aspect_for_villain(villain_id: int, difficulty: str) -> Option
         
         # EL SVM DECIDE 100% ENTRE LAS COMBINACIONES GANADORAS
         # El SVM elige la mejor entre las que sabemos que pueden ganar
-        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
         difficulty_encoded = 0 if difficulty == 'normal' else 1
         
         best_combination = None
@@ -643,7 +644,7 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
         difficulty_encoded = 0 if difficulty == 'normal' else 1
         
         print(f"🤖 SVM (IA) analizando cartas candidatas para {aspect} contra este villano...")
@@ -1055,7 +1056,7 @@ async def generate_deck_for_villain(
     model = load_model()
     win_probability = None
     if model:
-        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3}
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
         difficulty_encoded = 0 if request_data.difficulty == 'normal' else 1
         
         # Obtener características agregadas promedio para este mazo
