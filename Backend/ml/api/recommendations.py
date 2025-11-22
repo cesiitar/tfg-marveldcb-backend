@@ -677,9 +677,9 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         
         all_winning_decks = cursor.fetchall()
         
-        # Extraer cartas únicas del aspecto
-        aspect_card_ids = set()
-        aspect_decks_info = {}  # {card_id: [{'hero_id': int, 'aspect': str}, ...]}
+        # Extraer TODAS las cartas de los mazos ganadores primero (sin filtrar por aspecto todavía)
+        all_deck_card_ids = set()
+        temp_decks_info = {}  # {card_id: [{'hero_id': int, 'aspect': str}, ...]}
         
         for deck_row in aspect_winning_decks:
             try:
@@ -687,15 +687,34 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
                 for card in deck_cards:
                     card_id = card.get('card_id')
                     if card_id:
-                        aspect_card_ids.add(card_id)
-                        if card_id not in aspect_decks_info:
-                            aspect_decks_info[card_id] = []
-                        aspect_decks_info[card_id].append({
+                        all_deck_card_ids.add(card_id)
+                        if card_id not in temp_decks_info:
+                            temp_decks_info[card_id] = []
+                        temp_decks_info[card_id].append({
                             'hero_id': deck_row['hero_id'],
                             'aspect': deck_row['aspect']
                         })
             except:
                 continue
+        
+        # Ahora verificar qué cartas son realmente del aspecto correcto (una sola consulta)
+        aspect_card_ids = set()
+        aspect_decks_info = {}
+        
+        if all_deck_card_ids:
+            placeholders = ','.join(['?'] * len(all_deck_card_ids))
+            cursor.execute(f'''
+                SELECT id, aspect FROM cards WHERE id IN ({placeholders})
+            ''', list(all_deck_card_ids))
+            
+            for row in cursor.fetchall():
+                card_id = row['id']
+                card_aspect = row['aspect']
+                if card_aspect == aspect:
+                    # Solo añadir si es del aspecto correcto
+                    aspect_card_ids.add(card_id)
+                    if card_id in temp_decks_info:
+                        aspect_decks_info[card_id] = temp_decks_info[card_id]
         
         # Extraer cartas básicas únicas
         basic_card_ids = set()
@@ -728,12 +747,12 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         
         if aspect_card_ids:
             placeholders = ','.join(['?'] * len(aspect_card_ids))
+            # Ya verificamos que son del aspecto correcto, así que solo necesitamos el filtro por ID
             cursor.execute(f'''
                 SELECT id, name, aspect, pack_name, deck_limit, type, cost
                 FROM cards
                 WHERE id IN ({placeholders})
-                    AND aspect = ?
-            ''', list(aspect_card_ids) + [aspect])
+            ''', list(aspect_card_ids))
             all_candidate_cards.extend(cursor.fetchall())
         
         if basic_card_ids:
@@ -751,6 +770,10 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
             return get_aspect_cards_fallback(aspect, needed_cards)
         
         print(f"   📊 Encontradas {len(aspect_card_ids)} cartas del aspecto y {len(basic_card_ids)} básicas")
+        print(f"   📊 Mazos ganadores con aspecto {aspect}: {len(aspect_winning_decks)}")
+        
+        if len(aspect_winning_decks) == 0:
+            print(f"   ⚠️  No hay mazos ganadores con aspecto {aspect} contra este villano. Usando fallback.")
         
         # 2. Para cada carta, usar el SVM para predecir probabilidad
         card_scores = {}  # {card_id: {'svm_prob': float, 'name': str, 'card_set': str, 'deck_limit': int, 'type': str, 'aspect': str}}
@@ -849,8 +872,17 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         conn.close()
         
         if len(selected_cards) < needed_cards:
+            print(f"   ⚠️  Solo se seleccionaron {len(selected_cards)} cartas, se necesitan {needed_cards}. Usando fallback para {needed_cards - current_total} cartas adicionales.")
             additional = get_aspect_cards_fallback(aspect, needed_cards - current_total)
             selected_cards.extend(additional)
+            print(f"   📝 Fallback añadió {len(additional)} cartas adicionales")
+        
+        # Verificar que todas las cartas seleccionadas sean del aspecto correcto o básicas
+        print(f"   📋 Cartas seleccionadas por el SVM:")
+        for card in selected_cards[:5]:  # Mostrar solo las primeras 5
+            print(f"      - {card['card_name']} ({card.get('clase', 'unknown')})")
+        if len(selected_cards) > 5:
+            print(f"      ... y {len(selected_cards) - 5} más")
         
         print(f"✅ SVM (IA) seleccionó {len(selected_cards)} cartas (100% decisión del SVM)")
         return selected_cards[:needed_cards] if len(selected_cards) > needed_cards else selected_cards
@@ -863,8 +895,16 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
 
 def get_aspect_cards_fallback(aspect: str, needed_cards: int) -> List[dict]:
     """
-    Función fallback para obtener cartas aleatorias del aspecto si el SVM falla
+    Función fallback para obtener cartas aleatorias del aspecto si el SVM falla o no hay suficientes datos.
+    
+    NOTA: Este fallback se usa cuando:
+    - No hay suficientes mazos ganadores con ese aspecto contra el villano
+    - El SVM no puede seleccionar suficientes cartas
+    - Hay un error en el proceso de selección
+    
+    Selecciona cartas aleatorias del aspecto especificado o básicas.
     """
+    print(f"   🔄 Usando fallback: seleccionando cartas aleatorias de {aspect} (no hay suficientes datos históricos)")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -898,18 +938,26 @@ def get_aspect_cards_fallback(aspect: str, needed_cards: int) -> List[dict]:
             quantity = min(random.randint(1, min(deck_limit, 3)), target_total - current_total)
             
             if quantity > 0:
+                # Determinar la clase correcta de la carta
+                card_aspect = row["aspect"]
+                if not card_aspect or card_aspect == '' or card_aspect == 'basic':
+                    card_clase = 'basic'
+                else:
+                    card_clase = card_aspect
+                
                 cards.append({
                     "card_id": row["id"],
                     "card_name": row["name"],
                     "card_set": row["pack_name"] or "Unknown",
                     "quantity": quantity,
                     "type": row["type"],
-                    "clase": row["aspect"] or 'basic',
+                    "clase": card_clase,
                     "set": row["pack_name"] or "Unknown"
                 })
                 current_total += quantity
         
         conn.close()
+        print(f"   📝 Fallback seleccionó {len(cards)} cartas aleatorias ({sum(c['quantity'] for c in cards)} copias totales)")
         return cards
     except Exception as e:
         print(f"Error en fallback: {e}")
@@ -1094,13 +1142,22 @@ async def generate_deck_for_villain(
         "creator_name": None,
         "created_at": None,
         "updated_at": None,
-        "favorite_count": 0,
-        "win_probability": win_probability  # Probabilidad de victoria según el SVM
+        "favorite_count": 0
     }
     
-    return {
+    # Añadir win_probability al deck si está disponible
+    if win_probability is not None:
+        deck["win_probability"] = win_probability
+    
+    # Construir respuesta base
+    response = {
         "deck": deck,
-        "message": "Mazo generado exitosamente",
-        "win_probability": win_probability  # También en el nivel superior para fácil acceso
+        "message": "Mazo generado exitosamente"
     }
+    
+    # Añadir win_probability al nivel superior si está disponible (opcional)
+    if win_probability is not None:
+        response["win_probability"] = float(win_probability)
+    
+    return response
 
