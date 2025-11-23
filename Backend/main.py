@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import json
@@ -10,6 +10,7 @@ import os
 # Añadir path para importar módulos ML
 sys.path.append(os.path.dirname(__file__))
 from ml.api.recommendations import router as recommendations_router
+from ml.models.train_model import train_villain_recommender
 
 app = FastAPI(title="MarvelCDB API", version="1.0.0")
 
@@ -1093,8 +1094,23 @@ async def create_deck(deck_data: dict, request: Request):
             detail=f"Error creating deck: {str(e)}"
         )
 
+def train_model_in_background():
+    """
+    Función que se ejecuta en segundo plano para entrenar el modelo después de subir una partida.
+    """
+    try:
+        print("🔄 Iniciando entrenamiento automático del modelo después de nueva partida...")
+        model = train_villain_recommender()
+        if model:
+            print("✅ Modelo entrenado exitosamente en segundo plano")
+        else:
+            print("⚠️  No se pudo entrenar el modelo (puede ser por falta de datos)")
+    except Exception as e:
+        print(f"❌ Error entrenando modelo en segundo plano: {str(e)}")
+        # No lanzamos excepción para no afectar la respuesta al usuario
+
 @app.post("/api/game-configurations", status_code=201)
-async def create_game_configuration(config_data: dict, request: Request):
+async def create_game_configuration(config_data: dict, request: Request, background_tasks: BackgroundTasks):
     """Crear una nueva configuración de partida"""
     try:
         ensure_game_configurations_table()
@@ -1193,6 +1209,9 @@ async def create_game_configuration(config_data: dict, request: Request):
         conn.close()
         
         print(f"✅ Configuración de partida creada: ID={game_config_id}")
+        
+        # Entrenar el modelo en segundo plano después de guardar la partida
+        background_tasks.add_task(train_model_in_background)
         
         return {
             "message": "Configuración de partida guardada correctamente",

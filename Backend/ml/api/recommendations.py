@@ -182,6 +182,7 @@ class DeckGenerationRequest(BaseModel):
     villain_id: int
     difficulty: str  # 'normal' o 'expert'
     patches: Optional[List[str]] = []  # Por ahora vacío, se implementará después
+    max_decks: Optional[int] = 3  # Número máximo de mazos a generar (por defecto 3, máximo 4)
 
 @router.post("/recommendations/train", status_code=200)
 async def train_model_endpoint(
@@ -552,6 +553,100 @@ def get_best_hero_aspect_for_villain(villain_id: int, difficulty: str) -> Option
         traceback.print_exc()
         return None
 
+def get_top_hero_aspect_combinations(villain_id: int, difficulty: str, top_n: int = 3) -> List[dict]:
+    """
+    Obtiene las mejores N combinaciones héroe/aspecto contra el villano, ordenadas por probabilidad del SVM.
+    
+    Returns: Lista de diccionarios con las mejores combinaciones ordenadas por win_probability (mayor a menor)
+    """
+    model = load_model()
+    if not model:
+        return []
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener combinaciones que tienen al menos 1 partida contra este villano
+        cursor.execute('''
+            SELECT 
+                d.hero_id, 
+                d.aspect,
+                COUNT(*) as total_games,
+                SUM(CASE WHEN gc.result = 'win' THEN 1 ELSE 0 END) as wins,
+                CAST(SUM(CASE WHEN gc.result = 'win' THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*) as win_rate
+            FROM game_configurations gc
+            JOIN decks d ON gc.deck_id = d.id
+            WHERE gc.villain_id = ?
+                AND gc.difficulty = ?
+                AND d.hero_id IS NOT NULL
+                AND d.aspect IS NOT NULL
+            GROUP BY d.hero_id, d.aspect
+            HAVING COUNT(*) > 0
+        ''', (villain_id, difficulty))
+        
+        historical_combinations = cursor.fetchall()
+        conn.close()
+        
+        if not historical_combinations:
+            return []
+        
+        # Solo considerar combinaciones que han GANADO al menos una vez
+        winning_combinations = [row for row in historical_combinations if row['win_rate'] > 0]
+        
+        if not winning_combinations:
+            return []
+        
+        # Calcular probabilidad del SVM para cada combinación
+        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
+        difficulty_encoded = 0 if difficulty == 'normal' else 1
+        
+        combinations_with_prob = []
+        
+        for row in winning_combinations:
+            hero_id = row["hero_id"]
+            aspect = row["aspect"]
+            win_rate = row["win_rate"]
+            total_games = row["total_games"]
+            
+            # Obtener características agregadas promedio para esta combinación
+            avg_features = get_average_deck_features(hero_id, aspect, villain_id, difficulty)
+            
+            # Preparar features para el SVM
+            features = np.array([[
+                hero_id,
+                aspect_map[aspect],
+                villain_id,
+                difficulty_encoded,
+                avg_features[0],  # avg_cost
+                avg_features[1],  # event_ratio
+                avg_features[2],  # ally_ratio
+                avg_features[3],  # upgrade_ratio
+                avg_features[4]   # support_ratio
+            ]])
+            
+            # El SVM predice la probabilidad
+            svm_prob = model.predict_proba(features)[0][1]
+            
+            combinations_with_prob.append({
+                "hero_id": hero_id,
+                "aspect": aspect,
+                "win_probability": float(svm_prob),
+                "win_rate": float(win_rate),
+                "total_games": int(total_games),
+                "wins": int(row["wins"])
+            })
+        
+        # Ordenar por probabilidad del SVM (mayor a menor) y devolver las top N
+        combinations_with_prob.sort(key=lambda x: x['win_probability'], reverse=True)
+        
+        return combinations_with_prob[:top_n]
+    except Exception as e:
+        print(f"Error obteniendo top combinaciones héroe/aspecto: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
 def get_all_heroes() -> List[dict]:
     """Obtiene todos los héroes disponibles"""
     try:
@@ -871,11 +966,14 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         
         conn.close()
         
-        if len(selected_cards) < needed_cards:
-            print(f"   ⚠️  Solo se seleccionaron {len(selected_cards)} cartas, se necesitan {needed_cards}. Usando fallback para {needed_cards - current_total} cartas adicionales.")
-            additional = get_aspect_cards_fallback(aspect, needed_cards - current_total)
+        # Verificar si necesitamos más copias (no cartas únicas, sino copias totales)
+        remaining_copies = needed_cards - current_total
+        if remaining_copies > 0:
+            print(f"   ⚠️  Solo se seleccionaron {current_total} copias de cartas, se necesitan {needed_cards}. Usando fallback para {remaining_copies} copias adicionales.")
+            additional = get_aspect_cards_fallback(aspect, remaining_copies)
             selected_cards.extend(additional)
-            print(f"   📝 Fallback añadió {len(additional)} cartas adicionales")
+            total_additional_copies = sum(c.get('quantity', 1) for c in additional)
+            print(f"   📝 Fallback añadió {len(additional)} cartas adicionales ({total_additional_copies} copias totales)")
         
         # Verificar que todas las cartas seleccionadas sean del aspecto correcto o básicas
         print(f"   📋 Cartas seleccionadas por el SVM:")
@@ -884,8 +982,22 @@ def get_aspect_cards_for_deck(aspect: str, needed_cards: int, villain_id: int, d
         if len(selected_cards) > 5:
             print(f"      ... y {len(selected_cards) - 5} más")
         
-        print(f"✅ SVM (IA) seleccionó {len(selected_cards)} cartas (100% decisión del SVM)")
-        return selected_cards[:needed_cards] if len(selected_cards) > needed_cards else selected_cards
+        # Asegurar que no excedamos el número de copias necesarias
+        final_cards = []
+        final_total = 0
+        for card in selected_cards:
+            if final_total >= needed_cards:
+                break
+            card_quantity = card.get('quantity', 1)
+            remaining = needed_cards - final_total
+            if card_quantity > remaining:
+                card = card.copy()
+                card['quantity'] = remaining
+            final_cards.append(card)
+            final_total += card.get('quantity', 1)
+        
+        print(f"✅ SVM (IA) seleccionó {len(final_cards)} cartas ({final_total} copias totales)")
+        return final_cards
         
     except Exception as e:
         print(f"Error obteniendo cartas con SVM: {e}")
@@ -922,7 +1034,7 @@ def get_aspect_cards_fallback(aspect: str, needed_cards: int) -> List[dict]:
                     WHEN aspect = '' OR aspect IS NULL OR aspect = 'basic' THEN 1
                     ELSE 2
                 END,
-                RANDOM()
+                id
             LIMIT ?
         ''', (aspect, aspect, needed_cards * 3))
         
@@ -935,7 +1047,17 @@ def get_aspect_cards_fallback(aspect: str, needed_cards: int) -> List[dict]:
                 break
             
             deck_limit = row["deck_limit"] or 3
-            quantity = min(random.randint(1, min(deck_limit, 3)), target_total - current_total)
+            # Hacer determinista: usar el ID de la carta para decidir cantidad (1, 2 o 3)
+            # Esto asegura que la misma carta siempre tenga la misma cantidad
+            card_hash = hash(row["id"]) % 3  # 0, 1 o 2
+            base_quantity = min(deck_limit, 3)
+            if base_quantity >= 3:
+                quantity = card_hash + 1  # 1, 2 o 3
+            elif base_quantity == 2:
+                quantity = min(card_hash + 1, 2)  # 1 o 2
+            else:
+                quantity = 1
+            quantity = min(quantity, target_total - current_total)
             
             if quantity > 0:
                 # Determinar la clase correcta de la carta
@@ -977,38 +1099,164 @@ def get_hero_name(hero_id: int) -> Optional[str]:
         print(f"Error obteniendo nombre del héroe: {e}")
         return None
 
+def generate_single_deck(hero_id: int, aspect: str, villain_id: int, difficulty: str, villain_name: str) -> Optional[dict]:
+    """
+    Genera un mazo individual para una combinación hero/aspect específica.
+    
+    Returns: Diccionario con el mazo generado o None si hay error
+    """
+    try:
+        # Obtener nombre del héroe
+        hero_name = get_hero_name(hero_id)
+        if not hero_name:
+            return None
+        
+        # Obtener cartas del héroe
+        hero_cards = get_hero_specific_cards(hero_id)
+        
+        # Calcular cuántas cartas adicionales necesitamos
+        # Hacer determinista: usar hash del villano+heroe para elegir entre 40-50
+        # Esto asegura que el mismo villano+heroe siempre genere el mismo número de cartas
+        current_total = sum(card.get("quantity", 1) for card in hero_cards)
+        # Usar hash determinista para elegir entre 40-50
+        hash_value = hash((villain_id, hero_id, difficulty)) % 11  # 0-10 para 40-50
+        target_total = 40 + hash_value  # Entre 40 y 50
+        needed_cards = max(0, target_total - current_total)
+        
+        # Obtener cartas del aspecto para completar el mazo
+        aspect_cards = get_aspect_cards_for_deck(aspect, needed_cards, villain_id, difficulty, hero_id)
+        
+        # Combinar cartas del héroe con las del aspecto
+        all_cards = hero_cards.copy()
+        current_total = sum(card.get("quantity", 1) for card in all_cards)
+        
+        # Añadir cartas del aspecto hasta llegar al objetivo
+        for card in aspect_cards:
+            if current_total >= target_total:
+                break
+            
+            card_quantity = card.get("quantity", 1)
+            if current_total + card_quantity <= target_total:
+                all_cards.append(card)
+                current_total += card_quantity
+            elif current_total < target_total:
+                remaining = target_total - current_total
+                if remaining > 0:
+                    card["quantity"] = remaining
+                    all_cards.append(card)
+                    current_total += remaining
+                break
+        
+        # Asegurar que tenemos al menos 40 cartas
+        final_total = sum(card.get("quantity", 1) for card in all_cards)
+        if final_total < 40:
+            # Añadir más cartas del aspecto si es necesario
+            additional_needed = 40 - final_total
+            additional_cards = get_aspect_cards_for_deck(aspect, additional_needed, villain_id, difficulty, hero_id)
+            for card in additional_cards:
+                if final_total >= 40:
+                    break
+                card_quantity = min(card.get("quantity", 1), 40 - final_total)
+                if card_quantity > 0:
+                    card["quantity"] = card_quantity
+                    all_cards.append(card)
+                    final_total += card_quantity
+        
+        # Calcular probabilidad de victoria del mazo completo usando el SVM
+        model = load_model()
+        win_probability = None
+        if model:
+            aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
+            difficulty_encoded = 0 if difficulty == 'normal' else 1
+            
+            # Obtener características agregadas promedio para este mazo
+            avg_features = get_average_deck_features(hero_id, aspect, villain_id, difficulty)
+            
+            features = np.array([[
+                hero_id,
+                aspect_map[aspect],
+                villain_id,
+                difficulty_encoded,
+                avg_features[0],  # avg_cost
+                avg_features[1],  # event_ratio
+                avg_features[2],  # ally_ratio
+                avg_features[3],  # upgrade_ratio
+                avg_features[4]   # support_ratio
+            ]])
+            
+            win_probability = float(model.predict_proba(features)[0][1])
+        
+        # Generar nombre y descripción del mazo
+        difficulty_text = "normal" if difficulty == "normal" else "experto"
+        deck_name = f"Mazo optimizado para {villain_name}"
+        deck_description = f"Mazo generado por IA (SVM) para enfrentar a {villain_name} en dificultad {difficulty_text}. Héroe: {hero_name}, Aspecto: {aspect}."
+        
+        # Construir mazo
+        deck = {
+            "id": None,
+            "name": deck_name,
+            "description": deck_description,
+            "hero_name": hero_name,
+            "hero_id": hero_id,
+            "aspect": aspect,
+            "cards": all_cards,
+            "creator_name": None,
+            "created_at": None,
+            "updated_at": None,
+            "favorite_count": 0
+        }
+        
+        # Añadir win_probability al deck si está disponible
+        if win_probability is not None:
+            deck["win_probability"] = win_probability
+        
+        return deck
+    except Exception as e:
+        print(f"Error generando mazo para {hero_id}/{aspect}: {e}")
+        return None
+
 @router.post("/recommendations/deck", response_model=dict, status_code=200)
 async def generate_deck_for_villain(
     request_data: DeckGenerationRequest,
     x_auth0_id: Optional[str] = Header(None, alias="X-Auth0-ID")
 ):
     """
-    Genera un mazo optimizado para un villano específico usando inteligencia artificial
+    Genera uno o varios mazos optimizados para un villano específico usando inteligencia artificial
     
     Request Body:
     {
         "villain_id": 994808,
         "difficulty": "normal",  // "normal" o "expert"
-        "patches": []  // Opcional: array de parches disponibles (por ahora vacío)
+        "patches": [],  // Opcional: array de parches disponibles (por ahora vacío)
+        "max_decks": 3  // Opcional: número máximo de mazos a generar (por defecto 3, máximo 4). Si hay menos combinaciones disponibles, se devolverán las que haya.
     }
     
     Response:
     {
-        "deck": {
-            "id": null,
-            "name": "Mazo optimizado para Rhino",
-            "description": "Mazo generado por IA para enfrentar a Rhino en dificultad normal",
-            "hero_name": "Spider-Man",
-            "hero_id": 1,
-            "aspect": "aggression",
-            "cards": [...],
-            "creator_name": null,
-            "created_at": null,
-            "updated_at": null,
-            "favorite_count": 0
-        },
-        "message": "Mazo generado exitosamente"
+        "decks": [
+            {
+                "id": null,
+                "name": "Mazo optimizado para Rhino",
+                "description": "Mazo generado por IA para enfrentar a Rhino en dificultad normal",
+                "hero_name": "Spider-Man",
+                "hero_id": 1,
+                "aspect": "aggression",
+                "cards": [...],
+                "win_probability": 0.75,
+                "creator_name": null,
+                "created_at": null,
+                "updated_at": null,
+                "favorite_count": 0
+            },
+            ...
+        ],
+        "message": "3 mazo(s) generado(s) exitosamente",
+        "total_requested": 3,
+        "total_generated": 3
     }
+    
+    Nota: Los mazos están ordenados por win_probability (mayor a menor).
+    Si hay menos combinaciones disponibles que las solicitadas, se devolverán las que haya.
     """
     # Validar autenticación
     if not x_auth0_id:
@@ -1024,6 +1272,11 @@ async def generate_deck_for_villain(
             detail="Dificultad inválida. Debe ser 'normal' o 'expert'"
         )
     
+    # Validar max_decks (máximo 4, por defecto 3)
+    max_decks = min(request_data.max_decks or 3, 4)  # Máximo 4 mazos
+    if max_decks < 1:
+        max_decks = 1
+    
     # Validar que el villano existe
     villain_name = get_villain_name(request_data.villain_id)
     if not villain_name:
@@ -1032,132 +1285,55 @@ async def generate_deck_for_villain(
             detail=f"Villano con ID {request_data.villain_id} no encontrado"
         )
     
-    # Obtener el mejor héroe/aspecto para este villano
-    best_combination = get_best_hero_aspect_for_villain(request_data.villain_id, request_data.difficulty)
+    # Obtener las mejores N combinaciones héroe/aspecto (puede haber menos de max_decks disponibles)
+    top_combinations = get_top_hero_aspect_combinations(request_data.villain_id, request_data.difficulty, top_n=max_decks)
     
-    if not best_combination:
+    if not top_combinations:
         raise HTTPException(
             status_code=503,
-            detail="No se pudo determinar un héroe/aspecto óptimo. El modelo de IA puede no estar disponible o no hay suficientes datos."
+            detail="No se pudo determinar combinaciones héroe/aspecto óptimas. El modelo de IA puede no estar disponible o no hay suficientes datos."
         )
     
-    hero_id = best_combination["hero_id"]
-    aspect = best_combination["aspect"]
+    # Generar un mazo para cada combinación disponible
+    # Nota: Puede haber menos combinaciones que max_decks si no hay suficientes datos históricos
+    generated_decks = []
+    for combination in top_combinations:
+        deck = generate_single_deck(
+            combination["hero_id"],
+            combination["aspect"],
+            request_data.villain_id,
+            request_data.difficulty,
+            villain_name
+        )
+        
+        if deck:
+            # Asegurar que win_probability esté presente (usar la de la combinación si no está en el deck)
+            if "win_probability" not in deck:
+                deck["win_probability"] = combination["win_probability"]
+            generated_decks.append(deck)
     
-    # Obtener nombre del héroe
-    hero_name = get_hero_name(hero_id)
-    if not hero_name:
+    if not generated_decks:
         raise HTTPException(
             status_code=500,
-            detail=f"Héroe con ID {hero_id} no encontrado"
+            detail="No se pudieron generar mazos. Intenta de nuevo."
         )
     
-    # Obtener cartas del héroe
-    hero_cards = get_hero_specific_cards(hero_id)
+    # Ordenar por win_probability (mayor a menor) - aunque ya deberían estar ordenados
+    generated_decks.sort(key=lambda d: d.get("win_probability", 0.0), reverse=True)
     
-    # Calcular cuántas cartas adicionales necesitamos
-    current_total = sum(card.get("quantity", 1) for card in hero_cards)
-    target_total = random.randint(40, 50)
-    needed_cards = max(0, target_total - current_total)
+    # Construir respuesta con información sobre cuántos mazos se generaron
+    num_decks = len(generated_decks)
+    if num_decks < max_decks:
+        message = f"{num_decks} mazo(s) generado(s) exitosamente (de {max_decks} solicitados - solo hay {num_decks} combinaciones disponibles)"
+    else:
+        message = f"{num_decks} mazo(s) generado(s) exitosamente"
     
-    # Obtener cartas del aspecto para completar el mazo
-    # Usar datos históricos de mazos ganadores contra este villano
-    aspect_cards = get_aspect_cards_for_deck(aspect, needed_cards, request_data.villain_id, request_data.difficulty, hero_id)
-    
-    # Combinar cartas del héroe con las del aspecto
-    all_cards = hero_cards.copy()
-    current_total = sum(card.get("quantity", 1) for card in all_cards)
-    
-    # Añadir cartas del aspecto hasta llegar al objetivo
-    for card in aspect_cards:
-        if current_total >= target_total:
-            break
-        
-        card_quantity = card.get("quantity", 1)
-        if current_total + card_quantity <= target_total:
-            all_cards.append(card)
-            current_total += card_quantity
-        elif current_total < target_total:
-            remaining = target_total - current_total
-            if remaining > 0:
-                card["quantity"] = remaining
-                all_cards.append(card)
-                current_total += remaining
-            break
-    
-    # Asegurar que tenemos al menos 40 cartas
-    final_total = sum(card.get("quantity", 1) for card in all_cards)
-    if final_total < 40:
-        # Añadir más cartas del aspecto si es necesario
-        additional_needed = 40 - final_total
-        additional_cards = get_aspect_cards_for_deck(aspect, additional_needed)
-        for card in additional_cards:
-            if final_total >= 40:
-                break
-            card_quantity = min(card.get("quantity", 1), 40 - final_total)
-            if card_quantity > 0:
-                card["quantity"] = card_quantity
-                all_cards.append(card)
-                final_total += card_quantity
-    
-    # Calcular probabilidad de victoria del mazo completo usando el SVM
-    model = load_model()
-    win_probability = None
-    if model:
-        aspect_map = {'aggression': 0, 'justice': 1, 'leadership': 2, 'protection': 3, 'pool': 4}
-        difficulty_encoded = 0 if request_data.difficulty == 'normal' else 1
-        
-        # Obtener características agregadas promedio para este mazo
-        avg_features = get_average_deck_features(hero_id, aspect, request_data.villain_id, request_data.difficulty)
-        
-        features = np.array([[
-            hero_id,
-            aspect_map[aspect],
-            request_data.villain_id,
-            difficulty_encoded,
-            avg_features[0],  # avg_cost
-            avg_features[1],  # event_ratio
-            avg_features[2],  # ally_ratio
-            avg_features[3],  # upgrade_ratio
-            avg_features[4]   # support_ratio
-        ]])
-        
-        win_probability = float(model.predict_proba(features)[0][1])
-        print(f"🎯 Probabilidad de victoria del mazo (SVM): {win_probability:.2%}")
-    
-    # Generar nombre y descripción del mazo
-    difficulty_text = "normal" if request_data.difficulty == "normal" else "experto"
-    deck_name = f"Mazo optimizado para {villain_name}"
-    deck_description = f"Mazo generado por IA (SVM) para enfrentar a {villain_name} en dificultad {difficulty_text}. Héroe: {hero_name}, Aspecto: {aspect}."
-    
-    # Construir respuesta
-    deck = {
-        "id": None,
-        "name": deck_name,
-        "description": deck_description,
-        "hero_name": hero_name,
-        "hero_id": hero_id,
-        "aspect": aspect,
-        "cards": all_cards,
-        "creator_name": None,
-        "created_at": None,
-        "updated_at": None,
-        "favorite_count": 0
-    }
-    
-    # Añadir win_probability al deck si está disponible
-    if win_probability is not None:
-        deck["win_probability"] = win_probability
-    
-    # Construir respuesta base
     response = {
-        "deck": deck,
-        "message": "Mazo generado exitosamente"
+        "decks": generated_decks,
+        "message": message,
+        "total_requested": max_decks,
+        "total_generated": num_decks
     }
-    
-    # Añadir win_probability al nivel superior si está disponible (opcional)
-    if win_probability is not None:
-        response["win_probability"] = float(win_probability)
     
     return response
 
