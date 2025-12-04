@@ -1,11 +1,13 @@
 from fastapi import FastAPI, HTTPException, Request, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import sqlite3
 import json
 import re
 from typing import List, Dict, Optional
 import sys
 import os
+import requests
 
 # Añadir path para importar módulos ML
 sys.path.append(os.path.dirname(__file__))
@@ -263,16 +265,28 @@ def ensure_deck_comments_table():
 # UTILIDADES DE ESQUEMA (cards)
 # =============================================================================
 def ensure_cards_columns():
-    """Garantiza que la tabla cards tenga columnas requeridas (p. ej., deck_limit)."""
+    """Garantiza que la tabla cards tenga todas las columnas requeridas."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(cards)")
     columns = [column[1] for column in cursor.fetchall()]
 
     altered = False
-    if 'deck_limit' not in columns:
-        cursor.execute('ALTER TABLE cards ADD COLUMN deck_limit INTEGER')
-        altered = True
+    required_columns = {
+        'deck_limit': 'INTEGER',
+        'health': 'INTEGER',
+        'attack': 'INTEGER',
+        'threat': 'INTEGER',
+        'traits': 'TEXT',
+        'text': 'TEXT',
+        'is_unique': 'BOOLEAN DEFAULT 0'
+    }
+    
+    for col_name, col_type in required_columns.items():
+        if col_name not in columns:
+            cursor.execute(f'ALTER TABLE cards ADD COLUMN {col_name} {col_type}')
+            altered = True
+            print(f"✅ Añadida columna {col_name} a la tabla cards")
 
     if altered:
         conn.commit()
@@ -2692,6 +2706,435 @@ async def delete_deck(deck_id: int, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
+        )
+
+# =============================================================================
+# IMPORTACIÓN DE CARTAS DESDE MARVELCDB
+# =============================================================================
+
+# URL base de la API de MarvelCDB
+MARVELCDB_API_BASE = "https://marvelcdb.com/api/public"
+
+# Modelos Pydantic para los endpoints
+class CheckMissingRequest(BaseModel):
+    card_codes: List[str]
+
+class ImportMissingRequest(BaseModel):
+    card_codes: List[str]
+
+def map_marvelcdb_card_to_db(card_data: dict) -> dict:
+    """
+    Mapea una carta de MarvelCDB a nuestra estructura de base de datos.
+    Incluye TODOS los campos necesarios para que la carta sea igual a las que ya tenemos.
+    
+    IMPORTANTE: Usa .get() con valores por defecto para TODOS los campos,
+    así nunca falla aunque la API no devuelva algún campo.
+    """
+    # Validar que tenemos al menos code y name (campos críticos)
+    if not card_data.get('code'):
+        raise ValueError("La carta debe tener un campo 'code'")
+    
+    if not card_data.get('name'):
+        print(f"⚠️  Advertencia: Carta {card_data.get('code')} no tiene nombre, usando 'Unknown'")
+    
+    # Convertir code a entero para id (siempre seguro porque validamos arriba)
+    card_id = card_data.get('code', '')
+    if card_id and str(card_id).isdigit():
+        card_id = int(card_id)
+    else:
+        card_id = abs(hash(str(card_id))) % 1000000
+    
+    # Función auxiliar para convertir a int de forma segura
+    def safe_int(value, default=0):
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    
+    # Función auxiliar para obtener string de forma segura
+    def safe_str(value, default=''):
+        if value is None:
+            return default
+        try:
+            return str(value)
+        except:
+            return default
+    
+    # Mapear campos principales con valores por defecto seguros
+    # TODOS los campos usan .get() con valores por defecto para que nunca falle
+    
+    # Obtener faction_code y type_code
+    faction_code = safe_str(card_data.get('faction_code'), '').lower()
+    type_code = safe_str(card_data.get('type_code'), '').lower()
+    
+    # Mapear aspect (clase) correctamente
+    # Si es un héroe, el aspect debe ser 'hero'
+    # Si es una carta de aspecto, usar el faction_code directamente
+    if type_code == 'hero':
+        aspect = 'hero'
+    elif faction_code in ['aggression', 'justice', 'leadership', 'protection', 'pool', 'basic', 'hero', 'encounter', 'campaign']:
+        aspect = faction_code
+    else:
+        # Si no reconocemos el faction_code, usar 'basic' como fallback
+        aspect = 'basic'
+        print(f"⚠️  Carta {card_data.get('code')} tiene faction_code desconocido: '{faction_code}', usando 'basic'")
+    
+    mapped = {
+        'id': card_id,
+        'name': safe_str(card_data.get('name'), 'Unknown Card'),
+        'aspect': aspect,  # aspect = clase (mapeado correctamente)
+        'type': type_code,
+        'cost': safe_int(card_data.get('cost'), 0),
+        'set_name': safe_str(card_data.get('pack_name'), ''),  # Nombre del pack
+        'set_code': safe_str(card_data.get('pack_code'), ''),  # Código del pack
+        'pack_code': safe_str(card_data.get('pack_code'), ''),
+        'pack_name': safe_str(card_data.get('pack_name'), ''),
+        'faction_code': faction_code,  # Guardar el faction_code original (en minúsculas)
+        'type_code': type_code,  # Guardar el type_code original (en minúsculas)
+        'card_set': safe_str(card_data.get('card_set_name') or card_data.get('pack_name'), ''),  # Set de la carta
+        'quantity': safe_int(card_data.get('quantity'), 1),
+        'deck_limit': None,  # Se procesa abajo
+        'health': None,  # Se procesa abajo
+        'attack': None,  # Se procesa abajo
+        'threat': None,  # Se procesa abajo
+        'traits': None,  # Se procesa abajo
+        'text': None,  # Se procesa abajo
+        'is_unique': 0  # Se procesa abajo
+    }
+    
+    # Procesar deck_limit (opcional)
+    deck_limit = card_data.get('deck_limit')
+    if deck_limit is not None:
+        mapped['deck_limit'] = safe_int(deck_limit, None)
+    
+    # Procesar health (opcional)
+    health = card_data.get('health')
+    if health is not None:
+        mapped['health'] = safe_int(health, None)
+    
+    # Procesar attack (opcional)
+    attack = card_data.get('attack')
+    if attack is not None:
+        mapped['attack'] = safe_int(attack, None)
+    
+    # Procesar threat (opcional)
+    # Algunas cartas usan 'scheme' en lugar de 'threat'
+    threat = card_data.get('threat') or card_data.get('scheme')
+    if threat is not None:
+        mapped['threat'] = safe_int(threat, None)
+    
+    # Procesar traits (opcional, puede ser string, lista o None)
+    traits = card_data.get('traits')
+    if traits:
+        try:
+            if isinstance(traits, list):
+                mapped['traits'] = ', '.join(str(t) for t in traits)
+            else:
+                mapped['traits'] = str(traits)
+        except:
+            mapped['traits'] = None
+    
+    # Procesar text (opcional)
+    text = card_data.get('text')
+    if text:
+        try:
+            mapped['text'] = str(text)
+        except:
+            mapped['text'] = None
+    
+    # Procesar is_unique (opcional, puede ser bool, int, string)
+    is_unique = card_data.get('is_unique', False)
+    try:
+        if isinstance(is_unique, bool):
+            mapped['is_unique'] = 1 if is_unique else 0
+        elif isinstance(is_unique, (int, str)):
+            mapped['is_unique'] = 1 if bool(int(str(is_unique))) else 0
+        else:
+            mapped['is_unique'] = 0
+    except:
+        mapped['is_unique'] = 0
+    
+    return mapped
+
+def card_exists_by_code(card_code: str) -> bool:
+    """Verifica si una carta existe en la BD usando su code de MarvelCDB"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Convertir code a entero para buscar
+    try:
+        card_id = int(card_code) if card_code.isdigit() else abs(hash(card_code)) % 1000000
+    except:
+        card_id = abs(hash(card_code)) % 1000000
+    
+    cursor.execute('SELECT COUNT(*) FROM cards WHERE id = ?', (card_id,))
+    exists = cursor.fetchone()[0] > 0
+    
+    conn.close()
+    return exists
+
+@app.post("/api/cards/check-missing", status_code=200)
+async def check_missing_cards(request_data: CheckMissingRequest):
+    """
+    Verifica qué cartas faltan en nuestra base de datos.
+    
+    Request Body:
+    {
+        "card_codes": ["01001", "01002", "01003"]
+    }
+    
+    Response:
+    {
+        "missing": ["01001", "01002"],
+        "existing": ["01003"],
+        "total_checked": 3
+    }
+    """
+    try:
+        card_codes = request_data.card_codes
+        
+        if not card_codes:
+            return {
+                "missing": [],
+                "existing": [],
+                "total_checked": 0
+            }
+        
+        missing = []
+        existing = []
+        
+        for code in card_codes:
+            if card_exists_by_code(code):
+                existing.append(code)
+            else:
+                missing.append(code)
+        
+        return {
+            "missing": missing,
+            "existing": existing,
+            "total_checked": len(card_codes)
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error verificando cartas: {str(e)}"
+        )
+
+@app.post("/api/cards/import-missing", status_code=200)
+async def import_missing_cards(
+    request_data: ImportMissingRequest,
+    request: Request
+):
+    """
+    Importa cartas faltantes desde la API pública de MarvelCDB.
+    
+    Request Body:
+    {
+        "card_codes": ["01001", "01002"]
+    }
+    
+    Response:
+    {
+        "imported": 2,
+        "failed": 0,
+        "skipped": 0,
+        "message": "2 cartas importadas exitosamente"
+    }
+    """
+    try:
+        # Asegurar que todas las columnas necesarias existan
+        ensure_cards_columns()
+        
+        card_codes = request_data.card_codes
+        
+        if not card_codes:
+            return {
+                "imported": 0,
+                "failed": 0,
+                "skipped": 0,
+                "message": "No se proporcionaron códigos de cartas"
+            }
+        
+        imported = 0
+        failed = 0
+        skipped = 0
+        errors = []
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for code in card_codes:
+            try:
+                # Verificar si ya existe
+                if card_exists_by_code(code):
+                    skipped += 1
+                    print(f"⏭️  Carta {code} ya existe, omitiendo")
+                    continue
+                
+                # Obtener carta desde MarvelCDB
+                print(f"📡 Obteniendo carta {code} desde MarvelCDB...")
+                try:
+                    response = requests.get(
+                        f"{MARVELCDB_API_BASE}/card/{code}",
+                        timeout=10
+                    )
+                    response.raise_for_status()  # Lanza excepción si status != 200
+                except requests.RequestException as e:
+                    failed += 1
+                    error_msg = f"Error obteniendo carta desde MarvelCDB: {str(e)}"
+                    errors.append({
+                        "code": code,
+                        "error": error_msg
+                    })
+                    print(f"❌ {error_msg}")
+                    continue
+                
+                try:
+                    marvelcdb_card = response.json()
+                except json.JSONDecodeError as e:
+                    failed += 1
+                    error_msg = f"Error parseando JSON de MarvelCDB: {str(e)}"
+                    errors.append({
+                        "code": code,
+                        "error": error_msg
+                    })
+                    print(f"❌ {error_msg}")
+                    continue
+                
+                # Log de debugging: mostrar qué campos devuelve la API (solo los primeros 10 campos)
+                if imported == 0:  # Solo la primera vez para no saturar logs
+                    print(f"📋 Campos devueltos por la API para carta {code}:")
+                    for i, (key, value) in enumerate(list(marvelcdb_card.items())[:10]):
+                        value_str = str(value)[:50] if value else "None"
+                        print(f"   - {key}: {value_str}")
+                    if len(marvelcdb_card) > 10:
+                        print(f"   ... y {len(marvelcdb_card) - 10} campos más")
+                
+                # Mapear a nuestra estructura (con manejo de errores robusto)
+                try:
+                    card_data = map_marvelcdb_card_to_db(marvelcdb_card)
+                    
+                    # Log de debugging para héroes y aspectos
+                    if card_data.get('type') == 'hero':
+                        print(f"   🦸 Héroe detectado: {card_data.get('name')} (aspect: {card_data.get('aspect')})")
+                    if card_data.get('aspect') in ['aggression', 'justice', 'leadership', 'protection', 'pool']:
+                        print(f"   🎯 Carta de aspecto {card_data.get('aspect')}: {card_data.get('name')}")
+                        
+                except Exception as e:
+                    failed += 1
+                    error_msg = f"Error mapeando carta: {str(e)}"
+                    errors.append({
+                        "code": code,
+                        "error": error_msg
+                    })
+                    print(f"❌ {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+                
+                # Insertar en la base de datos con INSERT OR IGNORE para evitar duplicados
+                try:
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO cards (
+                            id, name, aspect, type, cost, set_name, set_code,
+                            pack_code, pack_name, faction_code, type_code, card_set,
+                            quantity, deck_limit, health, attack, threat, traits, text, is_unique
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        card_data['id'],
+                        card_data['name'],
+                        card_data['aspect'],
+                        card_data['type'],
+                        card_data['cost'],
+                        card_data['set_name'],
+                        card_data['set_code'],
+                        card_data['pack_code'],
+                        card_data['pack_name'],
+                        card_data['faction_code'],
+                        card_data['type_code'],
+                        card_data['card_set'],
+                        card_data['quantity'],
+                        card_data['deck_limit'],
+                        card_data['health'],
+                        card_data['attack'],
+                        card_data['threat'],
+                        card_data['traits'],
+                        card_data['text'],
+                        card_data['is_unique']
+                    ))
+                    
+                    # Verificar si realmente se insertó (puede que ya existiera)
+                    if cursor.rowcount > 0:
+                        imported += 1
+                        print(f"✅ Carta {code} ({card_data['name']}) importada exitosamente")
+                    else:
+                        skipped += 1
+                        print(f"⏭️  Carta {code} ya existía (INSERT OR IGNORE)")
+                        
+                except sqlite3.IntegrityError as e:
+                    # Si hay error de integridad (duplicado), omitir
+                    skipped += 1
+                    print(f"⏭️  Carta {code} ya existe (error de integridad)")
+                except Exception as e:
+                    failed += 1
+                    error_msg = f"Error guardando en BD: {str(e)}"
+                    errors.append({
+                        "code": code,
+                        "error": error_msg
+                    })
+                    print(f"❌ {error_msg}")
+                
+            except requests.RequestException as e:
+                failed += 1
+                error_msg = f"Error obteniendo carta desde MarvelCDB: {str(e)}"
+                errors.append({
+                    "code": code,
+                    "error": error_msg
+                })
+                print(f"❌ {error_msg}")
+            except Exception as e:
+                failed += 1
+                error_msg = f"Error procesando carta: {str(e)}"
+                errors.append({
+                    "code": code,
+                    "error": error_msg
+                })
+                print(f"❌ {error_msg}")
+        
+        conn.commit()
+        conn.close()
+        
+        # Construir mensaje
+        message_parts = []
+        if imported > 0:
+            message_parts.append(f"{imported} carta(s) importada(s)")
+        if failed > 0:
+            message_parts.append(f"{failed} fallaron")
+        if skipped > 0:
+            message_parts.append(f"{skipped} omitida(s)")
+        
+        message = ", ".join(message_parts) if message_parts else "Ninguna acción realizada"
+        
+        response_data = {
+            "imported": imported,
+            "failed": failed,
+            "skipped": skipped,
+            "message": message
+        }
+        
+        if errors:
+            response_data["errors"] = errors
+        
+        return response_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error importando cartas: {str(e)}"
         )
 
 if __name__ == "__main__":
