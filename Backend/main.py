@@ -3004,14 +3004,14 @@ async def import_missing_cards(
                     print(f"❌ {error_msg}")
                     continue
                 
-                # Log de debugging: mostrar qué campos devuelve la API (solo los primeros 10 campos)
-                if imported == 0:  # Solo la primera vez para no saturar logs
-                    print(f"📋 Campos devueltos por la API para carta {code}:")
-                    for i, (key, value) in enumerate(list(marvelcdb_card.items())[:10]):
-                        value_str = str(value)[:50] if value else "None"
-                        print(f"   - {key}: {value_str}")
-                    if len(marvelcdb_card) > 10:
-                        print(f"   ... y {len(marvelcdb_card) - 10} campos más")
+                # Log de debugging: mostrar campos importantes
+                print(f"📋 Campos importantes de la API para carta {code}:")
+                print(f"   - code: {marvelcdb_card.get('code')}")
+                print(f"   - name: {marvelcdb_card.get('name')}")
+                print(f"   - type_code: {marvelcdb_card.get('type_code')}")
+                print(f"   - faction_code: {marvelcdb_card.get('faction_code')}")
+                print(f"   - pack_code: {marvelcdb_card.get('pack_code')}")
+                print(f"   - pack_name: {marvelcdb_card.get('pack_name')}")
                 
                 # Mapear a nuestra estructura (con manejo de errores robusto)
                 try:
@@ -3071,9 +3071,19 @@ async def import_missing_cards(
                     if cursor.rowcount > 0:
                         imported += 1
                         print(f"✅ Carta {code} ({card_data['name']}) importada exitosamente")
+                        print(f"   - ID en BD: {card_data['id']}")
+                        print(f"   - Aspect (clase): {card_data['aspect']}")
+                        print(f"   - Type: {card_data['type']}")
+                        print(f"   - Faction Code: {card_data['faction_code']}")
                     else:
                         skipped += 1
                         print(f"⏭️  Carta {code} ya existía (INSERT OR IGNORE)")
+                        
+                        # Verificar qué tiene en BD
+                        cursor.execute('SELECT id, name, aspect, type, faction_code FROM cards WHERE id = ?', (card_data['id'],))
+                        existing = cursor.fetchone()
+                        if existing:
+                            print(f"   - En BD: ID={existing[0]}, Aspect={existing[2]}, Type={existing[3]}, Faction={existing[4]}")
                         
                 except sqlite3.IntegrityError as e:
                     # Si hay error de integridad (duplicado), omitir
