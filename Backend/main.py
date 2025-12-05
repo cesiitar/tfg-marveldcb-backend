@@ -279,7 +279,8 @@ def ensure_cards_columns():
         'threat': 'INTEGER',
         'traits': 'TEXT',
         'text': 'TEXT',
-        'is_unique': 'BOOLEAN DEFAULT 0'
+        'is_unique': 'BOOLEAN DEFAULT 0',
+        'marvelcdb_code': 'VARCHAR(20)'  # Código de MarvelCDB (ej: "01001", "01002")
     }
     
     for col_name, col_type in required_columns.items():
@@ -287,6 +288,14 @@ def ensure_cards_columns():
             cursor.execute(f'ALTER TABLE cards ADD COLUMN {col_name} {col_type}')
             altered = True
             print(f"✅ Añadida columna {col_name} a la tabla cards")
+    
+    # Crear índice único en marvelcdb_code si no existe
+    if 'marvelcdb_code' in columns or altered:
+        try:
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_marvelcdb_code ON cards(marvelcdb_code)')
+            conn.commit()
+        except:
+            pass  # El índice ya existe o hay duplicados, no es crítico
 
     if altered:
         conn.commit()
@@ -636,6 +645,72 @@ async def get_hero_cards(hero_id: int):
     
     conn.close()
     return cards  # Devolver array directo como espera el frontend
+
+@app.get("/api/cards/marvelcdb-code/{code}")
+async def get_card_by_marvelcdb_code(code: str):
+    """
+    Busca una carta por su código de MarvelCDB (code, no id).
+    El frontend usa el campo 'code' de MarvelCDB como identificador único.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Verificar si la columna marvelcdb_code existe
+    cursor.execute("PRAGMA table_info(cards)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'marvelcdb_code' in columns:
+        # Buscar por marvelcdb_code (método preferido)
+        cursor.execute('''
+            SELECT id, name, aspect, type, cost, set_name, deck_limit, marvelcdb_code
+            FROM cards 
+            WHERE marvelcdb_code = ?
+        ''', (code,))
+    else:
+        # Fallback: buscar por id (convertir code a id)
+        try:
+            card_id = int(code) if code.isdigit() else abs(hash(code)) % 1000000
+        except:
+            card_id = abs(hash(code)) % 1000000
+        cursor.execute('''
+            SELECT id, name, aspect, type, cost, set_name, deck_limit
+            FROM cards 
+            WHERE id = ?
+        ''', (card_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Carta no encontrada"
+        )
+    
+    # Construir respuesta según si tiene marvelcdb_code o no
+    if 'marvelcdb_code' in columns and len(row) > 7:
+        card = {
+            "id": row[0],
+            "name": row[1],
+            "clase": row[2],  # aspect = clase
+            "type": row[3],
+            "cost": row[4],
+            "set": row[5],
+            "max_quantity": (row[6] if row[6] is not None else 3),
+            "marvelcdb_code": row[7]
+        }
+    else:
+        card = {
+            "id": row[0],
+            "name": row[1],
+            "clase": row[2],  # aspect = clase
+            "type": row[3],
+            "cost": row[4],
+            "set": row[5],
+            "max_quantity": (row[6] if row[6] is not None else 3)
+        }
+    
+    return card
 
 @app.get("/api/cards/aspect/{aspect}")
 async def get_cards_by_aspect(aspect: str):
@@ -2781,6 +2856,9 @@ def map_marvelcdb_card_to_db(card_data: dict) -> dict:
         aspect = 'basic'
         print(f"⚠️  Carta {card_data.get('code')} tiene faction_code desconocido: '{faction_code}', usando 'basic'")
     
+    # Obtener el code original de MarvelCDB (CRÍTICO: guardar el code, no el id)
+    marvelcdb_code = safe_str(card_data.get('code'), '')
+    
     mapped = {
         'id': card_id,
         'name': safe_str(card_data.get('name'), 'Unknown Card'),
@@ -2795,6 +2873,7 @@ def map_marvelcdb_card_to_db(card_data: dict) -> dict:
         'type_code': type_code,  # Guardar el type_code original (en minúsculas)
         'card_set': safe_str(card_data.get('card_set_name') or card_data.get('pack_name'), ''),  # Set de la carta
         'quantity': safe_int(card_data.get('quantity'), 1),
+        'marvelcdb_code': marvelcdb_code,  # CRÍTICO: Guardar el code de MarvelCDB (ej: "01001")
         'deck_limit': None,  # Se procesa abajo
         'health': None,  # Se procesa abajo
         'attack': None,  # Se procesa abajo
@@ -2863,20 +2942,33 @@ def card_exists_by_code(card_code: str) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Convertir code a entero para buscar
-    try:
-        card_id = int(card_code) if card_code.isdigit() else abs(hash(card_code)) % 1000000
-    except:
-        card_id = abs(hash(card_code)) % 1000000
+    # Buscar por marvelcdb_code (el code original de MarvelCDB)
+    # Primero verificar si la columna existe
+    cursor.execute("PRAGMA table_info(cards)")
+    columns = [column[1] for column in cursor.fetchall()]
     
-    cursor.execute('SELECT COUNT(*) FROM cards WHERE id = ?', (card_id,))
-    exists = cursor.fetchone()[0] > 0
+    if 'marvelcdb_code' in columns:
+        # Buscar por marvelcdb_code (método preferido)
+        cursor.execute('SELECT COUNT(*) FROM cards WHERE marvelcdb_code = ?', (card_code,))
+        exists = cursor.fetchone()[0] > 0
+    else:
+        # Fallback: buscar por id (convertir code a id)
+        try:
+            card_id = int(card_code) if card_code.isdigit() else abs(hash(card_code)) % 1000000
+        except:
+            card_id = abs(hash(card_code)) % 1000000
+        cursor.execute('SELECT COUNT(*) FROM cards WHERE id = ?', (card_id,))
+        exists = cursor.fetchone()[0] > 0
     
     conn.close()
     return exists
 
 @app.post("/api/cards/check-missing", status_code=200)
 async def check_missing_cards(request_data: CheckMissingRequest):
+    """
+    Verifica qué cartas faltan en nuestra BD usando los códigos de MarvelCDB.
+    El frontend pasa los códigos (code) de MarvelCDB, no los IDs.
+    """
     """
     Verifica qué cartas faltan en nuestra base de datos.
     
@@ -3037,53 +3129,112 @@ async def import_missing_cards(
                 
                 # Insertar en la base de datos con INSERT OR IGNORE para evitar duplicados
                 try:
-                    cursor.execute('''
-                        INSERT OR IGNORE INTO cards (
-                            id, name, aspect, type, cost, set_name, set_code,
-                            pack_code, pack_name, faction_code, type_code, card_set,
-                            quantity, deck_limit, health, attack, threat, traits, text, is_unique
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        card_data['id'],
-                        card_data['name'],
-                        card_data['aspect'],
-                        card_data['type'],
-                        card_data['cost'],
-                        card_data['set_name'],
-                        card_data['set_code'],
-                        card_data['pack_code'],
-                        card_data['pack_name'],
-                        card_data['faction_code'],
-                        card_data['type_code'],
-                        card_data['card_set'],
-                        card_data['quantity'],
-                        card_data['deck_limit'],
-                        card_data['health'],
-                        card_data['attack'],
-                        card_data['threat'],
-                        card_data['traits'],
-                        card_data['text'],
-                        card_data['is_unique']
-                    ))
+                    # Verificar si la columna marvelcdb_code existe
+                    cursor.execute("PRAGMA table_info(cards)")
+                    columns = [column[1] for column in cursor.fetchall()]
+                    has_marvelcdb_code = 'marvelcdb_code' in columns
+                    
+                    if has_marvelcdb_code:
+                        cursor.execute('''
+                            INSERT OR IGNORE INTO cards (
+                                id, name, aspect, type, cost, set_name, set_code,
+                                pack_code, pack_name, faction_code, type_code, card_set,
+                                quantity, deck_limit, health, attack, threat, traits, text, is_unique, marvelcdb_code
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            card_data['id'],
+                            card_data['name'],
+                            card_data['aspect'],
+                            card_data['type'],
+                            card_data['cost'],
+                            card_data['set_name'],
+                            card_data['set_code'],
+                            card_data['pack_code'],
+                            card_data['pack_name'],
+                            card_data['faction_code'],
+                            card_data['type_code'],
+                            card_data['card_set'],
+                            card_data['quantity'],
+                            card_data['deck_limit'],
+                            card_data['health'],
+                            card_data['attack'],
+                            card_data['threat'],
+                            card_data['traits'],
+                            card_data['text'],
+                            card_data['is_unique'],
+                            card_data.get('marvelcdb_code', '')  # Guardar el code de MarvelCDB
+                        ))
+                    else:
+                        # Fallback si la columna no existe (para compatibilidad)
+                        cursor.execute('''
+                            INSERT OR IGNORE INTO cards (
+                                id, name, aspect, type, cost, set_name, set_code,
+                                pack_code, pack_name, faction_code, type_code, card_set,
+                                quantity, deck_limit, health, attack, threat, traits, text, is_unique
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            card_data['id'],
+                            card_data['name'],
+                            card_data['aspect'],
+                            card_data['type'],
+                            card_data['cost'],
+                            card_data['set_name'],
+                            card_data['set_code'],
+                            card_data['pack_code'],
+                            card_data['pack_name'],
+                            card_data['faction_code'],
+                            card_data['type_code'],
+                            card_data['card_set'],
+                            card_data['quantity'],
+                            card_data['deck_limit'],
+                            card_data['health'],
+                            card_data['attack'],
+                            card_data['threat'],
+                            card_data['traits'],
+                            card_data['text'],
+                            card_data['is_unique']
+                        ))
                     
                     # Verificar si realmente se insertó (puede que ya existiera)
                     if cursor.rowcount > 0:
                         imported += 1
                         print(f"✅ Carta {code} ({card_data['name']}) importada exitosamente")
                         print(f"   - ID en BD: {card_data['id']}")
+                        print(f"   - MarvelCDB Code: {card_data.get('marvelcdb_code', 'N/A')}")
                         print(f"   - Aspect (clase): {card_data['aspect']}")
                         print(f"   - Type: {card_data['type']}")
                         print(f"   - Faction Code: {card_data['faction_code']}")
                     else:
-                        skipped += 1
-                        print(f"⏭️  Carta {code} ya existía (INSERT OR IGNORE)")
+                        # La carta ya existe, pero puede que no tenga marvelcdb_code
+                        # Intentar actualizar el marvelcdb_code si falta
+                        if has_marvelcdb_code:
+                            cursor.execute('''
+                                UPDATE cards 
+                                SET marvelcdb_code = ? 
+                                WHERE id = ? AND (marvelcdb_code IS NULL OR marvelcdb_code = '')
+                            ''', (code, card_data['id']))
+                            if cursor.rowcount > 0:
+                                print(f"✅ Actualizado marvelcdb_code para carta {code} (ID: {card_data['id']})")
+                                imported += 1  # Contar como importada si se actualizó
+                            else:
+                                skipped += 1
+                                print(f"⏭️  Carta {code} ya existía (INSERT OR IGNORE)")
+                        else:
+                            skipped += 1
+                            print(f"⏭️  Carta {code} ya existía (INSERT OR IGNORE)")
                         
-                        # Verificar qué tiene en BD
-                        cursor.execute('SELECT id, name, aspect, type, faction_code FROM cards WHERE id = ?', (card_data['id'],))
+                        # Verificar qué tiene en BD (buscar por marvelcdb_code si existe, sino por id)
+                        if has_marvelcdb_code:
+                            cursor.execute('SELECT id, name, aspect, type, faction_code, marvelcdb_code FROM cards WHERE marvelcdb_code = ? OR id = ?', (code, card_data['id']))
+                        else:
+                            cursor.execute('SELECT id, name, aspect, type, faction_code FROM cards WHERE id = ?', (card_data['id'],))
                         existing = cursor.fetchone()
                         if existing:
                             print(f"   - En BD: ID={existing[0]}, Aspect={existing[2]}, Type={existing[3]}, Faction={existing[4]}")
+                            if has_marvelcdb_code and len(existing) > 5:
+                                print(f"   - MarvelCDB Code en BD: {existing[5]}")
                         
                 except sqlite3.IntegrityError as e:
                     # Si hay error de integridad (duplicado), omitir
