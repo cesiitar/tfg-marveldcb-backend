@@ -2794,8 +2794,33 @@ MARVELCDB_API_BASE = "https://marvelcdb.com/api/public"
 class CheckMissingRequest(BaseModel):
     card_codes: List[str]
 
+class CardData(BaseModel):
+    """Datos completos de una carta que el frontend puede pasar"""
+    code: str  # Código de MarvelCDB (ej: "01001")
+    name: Optional[str] = None
+    type_code: Optional[str] = None
+    faction_code: Optional[str] = None
+    pack_code: Optional[str] = None
+    pack_name: Optional[str] = None
+    cost: Optional[int] = None
+    deck_limit: Optional[int] = None
+    health: Optional[int] = None
+    attack: Optional[int] = None
+    threat: Optional[int] = None
+    scheme: Optional[int] = None
+    traits: Optional[str] = None
+    text: Optional[str] = None
+    is_unique: Optional[bool] = None
+    quantity: Optional[int] = 1
+    card_set_name: Optional[str] = None
+
 class ImportMissingRequest(BaseModel):
-    card_codes: List[str]
+    card_codes: Optional[List[str]] = None  # Códigos para buscar desde MarvelCDB
+    cards: Optional[List[CardData]] = None  # Datos completos de cartas (si el frontend ya los tiene)
+    
+    class Config:
+        # Permitir que se pase card_codes o cards (o ambos)
+        pass
 
 def map_marvelcdb_card_to_db(card_data: dict) -> dict:
     """
@@ -3021,11 +3046,39 @@ async def import_missing_cards(
     request: Request
 ):
     """
-    Importa cartas faltantes desde la API pública de MarvelCDB.
+    Importa cartas faltantes desde la API pública de MarvelCDB o desde los datos proporcionados por el frontend.
     
-    Request Body:
+    Request Body (Opción 1 - Solo códigos):
     {
         "card_codes": ["01001", "01002"]
+    }
+    
+    Request Body (Opción 2 - Datos completos):
+    {
+        "cards": [
+            {
+                "code": "01001",
+                "name": "Spider-Man",
+                "type_code": "hero",
+                "faction_code": "hero",
+                "pack_code": "core",
+                "pack_name": "Core Set",
+                "cost": 0,
+                ...
+            }
+        ]
+    }
+    
+    Request Body (Opción 3 - Ambos):
+    {
+        "card_codes": ["01001"],
+        "cards": [
+            {
+                "code": "01002",
+                "name": "Black Cat",
+                ...
+            }
+        ]
     }
     
     Response:
@@ -3040,16 +3093,6 @@ async def import_missing_cards(
         # Asegurar que todas las columnas necesarias existan
         ensure_cards_columns()
         
-        card_codes = request_data.card_codes
-        
-        if not card_codes:
-            return {
-                "imported": 0,
-                "failed": 0,
-                "skipped": 0,
-                "message": "No se proporcionaron códigos de cartas"
-            }
-        
         imported = 0
         failed = 0
         skipped = 0
@@ -3057,6 +3100,145 @@ async def import_missing_cards(
         
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Procesar cartas con datos completos (si el frontend los proporciona)
+        if request_data.cards:
+            for card_data_pydantic in request_data.cards:
+                try:
+                    code = card_data_pydantic.code
+                    
+                    # Verificar si ya existe
+                    if card_exists_by_code(code):
+                        skipped += 1
+                        print(f"⏭️  Carta {code} ya existe, omitiendo")
+                        continue
+                    
+                    # Convertir el modelo Pydantic a dict
+                    card_dict = card_data_pydantic.dict(exclude_none=True)
+                    
+                    # Asegurar que tenemos los campos mínimos
+                    if not card_dict.get('name'):
+                        failed += 1
+                        errors.append({
+                            "code": code,
+                            "error": "La carta debe tener al menos 'code' y 'name'"
+                        })
+                        continue
+                    
+                    # Mapear a nuestra estructura
+                    try:
+                        card_data = map_marvelcdb_card_to_db(card_dict)
+                    except Exception as e:
+                        failed += 1
+                        errors.append({
+                            "code": code,
+                            "error": f"Error mapeando carta: {str(e)}"
+                        })
+                        continue
+                    
+                    # Insertar en BD (mismo código que abajo)
+                    try:
+                        cursor.execute("PRAGMA table_info(cards)")
+                        columns = [column[1] for column in cursor.fetchall()]
+                        has_marvelcdb_code = 'marvelcdb_code' in columns
+                        
+                        if has_marvelcdb_code:
+                            cursor.execute('''
+                                INSERT OR IGNORE INTO cards (
+                                    id, name, aspect, type, cost, set_name, set_code,
+                                    pack_code, pack_name, faction_code, type_code, card_set,
+                                    quantity, deck_limit, health, attack, threat, traits, text, is_unique, marvelcdb_code
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                card_data['id'],
+                                card_data['name'],
+                                card_data['aspect'],
+                                card_data['type'],
+                                card_data['cost'],
+                                card_data['set_name'],
+                                card_data['set_code'],
+                                card_data['pack_code'],
+                                card_data['pack_name'],
+                                card_data['faction_code'],
+                                card_data['type_code'],
+                                card_data['card_set'],
+                                card_data['quantity'],
+                                card_data['deck_limit'],
+                                card_data['health'],
+                                card_data['attack'],
+                                card_data['threat'],
+                                card_data['traits'],
+                                card_data['text'],
+                                card_data['is_unique'],
+                                card_data.get('marvelcdb_code', '')
+                            ))
+                        else:
+                            cursor.execute('''
+                                INSERT OR IGNORE INTO cards (
+                                    id, name, aspect, type, cost, set_name, set_code,
+                                    pack_code, pack_name, faction_code, type_code, card_set,
+                                    quantity, deck_limit, health, attack, threat, traits, text, is_unique
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                card_data['id'],
+                                card_data['name'],
+                                card_data['aspect'],
+                                card_data['type'],
+                                card_data['cost'],
+                                card_data['set_name'],
+                                card_data['set_code'],
+                                card_data['pack_code'],
+                                card_data['pack_name'],
+                                card_data['faction_code'],
+                                card_data['type_code'],
+                                card_data['card_set'],
+                                card_data['quantity'],
+                                card_data['deck_limit'],
+                                card_data['health'],
+                                card_data['attack'],
+                                card_data['threat'],
+                                card_data['traits'],
+                                card_data['text'],
+                                card_data['is_unique']
+                            ))
+                        
+                        if cursor.rowcount > 0:
+                            imported += 1
+                            print(f"✅ Carta {code} ({card_data['name']}) importada desde datos del frontend")
+                        else:
+                            skipped += 1
+                            print(f"⏭️  Carta {code} ya existía")
+                    
+                    except Exception as e:
+                        failed += 1
+                        errors.append({
+                            "code": code,
+                            "error": f"Error insertando en BD: {str(e)}"
+                        })
+                        print(f"❌ Error insertando carta {code}: {e}")
+                
+                except Exception as e:
+                    failed += 1
+                    errors.append({
+                        "code": card_data_pydantic.code if hasattr(card_data_pydantic, 'code') else 'unknown',
+                        "error": f"Error procesando carta: {str(e)}"
+                    })
+                    print(f"❌ Error procesando carta: {e}")
+        
+        # Procesar códigos (buscar desde MarvelCDB)
+        card_codes = request_data.card_codes or []
+        
+        if not card_codes and not request_data.cards:
+            conn.close()
+            return {
+                "imported": imported,
+                "failed": failed,
+                "skipped": skipped,
+                "message": f"{imported} carta(s) importada(s), {failed} fallaron, {skipped} omitidas",
+                "errors": errors if errors else None
+            }
         
         for code in card_codes:
             try:
