@@ -710,7 +710,8 @@ async def get_card_by_marvelcdb_code(code: str):
             "max_quantity": (row[6] if row[6] is not None else 3)
         }
     
-    return card
+    # Devolver en el formato esperado por el frontend
+    return {"card": card}
 
 @app.get("/api/cards/aspect/{aspect}")
 async def get_cards_by_aspect(aspect: str):
