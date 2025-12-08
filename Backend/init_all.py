@@ -98,6 +98,53 @@ def initialize_database():
         )
     ''')
     
+    # Tabla game_configurations (partidas)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS game_configurations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            deck_id INTEGER NOT NULL,
+            difficulty TEXT NOT NULL,
+            villain_id INTEGER NOT NULL,
+            result TEXT NOT NULL,
+            played_at TEXT NOT NULL,
+            FOREIGN KEY (villain_id) REFERENCES cards(id)
+        )
+    ''')
+    
+    # Tabla user_favorites (favoritos)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            deck_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(user_id, deck_id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Tabla deck_comments (comentarios)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS deck_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id INTEGER NOT NULL,
+            auth0_id TEXT NOT NULL,
+            comment_text TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT,
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Crear índices para deck_comments
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_deck_comments_deck_id ON deck_comments(deck_id)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_deck_comments_auth0_id ON deck_comments(auth0_id)
+    ''')
+    
     conn.commit()
     conn.close()
     print("✅ Base de datos inicializada")
