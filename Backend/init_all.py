@@ -463,10 +463,10 @@ def main():
     if cards_data:
         import_cards(cards_data)
     
-    # 5. Importar mazos públicos
-    decks_data = fetch_popular_decks()
-    if decks_data:
-        import_decks(decks_data)
+    # 5. (omitido) Importar mazos públicos
+    # decks_data = fetch_popular_decks()
+    # if decks_data:
+    #     import_decks(decks_data)
     
     # 6. Importar villanos y encounter cards
     import_villains_and_encounters()
@@ -476,7 +476,7 @@ def main():
     print("💡 Base de datos lista con:")
     print("   - Cartas con información de sets de héroes")
     print("   - Sets de cartas")
-    print("   - Mazos públicos reales")
+    # print("   - Mazos públicos reales")
     print("🚀 Ahora puedes ejecutar: py main.py")
 
 if __name__ == "__main__":

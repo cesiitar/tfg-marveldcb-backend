@@ -65,7 +65,9 @@ app.add_middleware(
 
 def get_db_connection():
     """Obtener conexión a la base de datos"""
-    conn = sqlite3.connect('marvel_cards.db')
+    # Usar variable de entorno si existe (para producción), sino usar ruta local
+    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
     return conn
 
