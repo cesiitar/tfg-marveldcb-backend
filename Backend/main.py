@@ -1404,7 +1404,16 @@ async def get_all_game_configurations():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Verificar si hay partidas antes de hacer JOINs
+        cursor.execute('SELECT COUNT(*) FROM game_configurations')
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            conn.close()
+            return {"games": []}
+        
         # Obtener todas las partidas con información del mazo, villano y creador
+        # Usar LEFT JOIN para evitar errores si faltan datos
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1417,11 +1426,11 @@ async def get_all_game_configurations():
                 d.hero_name,
                 d.aspect,
                 d.user_id,
-                c.card_set as villain_name,
+                COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
                 u.name as creator_name
             FROM game_configurations gc
-            JOIN decks d ON gc.deck_id = d.id
-            JOIN cards c ON gc.villain_id = c.id
+            LEFT JOIN decks d ON gc.deck_id = d.id
+            LEFT JOIN cards c ON gc.villain_id = c.id
             LEFT JOIN users u ON d.user_id = u.id
             ORDER BY gc.played_at DESC
         ''')
@@ -1431,15 +1440,15 @@ async def get_all_game_configurations():
             game = {
                 "id": row["id"],
                 "deck_id": row["deck_id"],
-                "deck_name": row["deck_name"],
-                "hero_name": row["hero_name"],
-                "aspect": row["aspect"],
+                "deck_name": row["deck_name"] if row["deck_name"] else "Unknown",
+                "hero_name": row["hero_name"] if row["hero_name"] else "Unknown",
+                "aspect": row["aspect"] if row["aspect"] else "Unknown",
                 "villain_id": row["villain_id"],
-                "villain_name": row["villain_name"],
+                "villain_name": row["villain_name"] if row["villain_name"] else "Unknown",
                 "difficulty": row["difficulty"],
                 "result": row["result"],
                 "played_at": row["played_at"],
-                "creator_name": row["creator_name"]
+                "creator_name": row["creator_name"] if row["creator_name"] else None
             }
             games.append(game)
         
@@ -1448,6 +1457,9 @@ async def get_all_game_configurations():
         return {"games": games}
         
     except Exception as e:
+        import traceback
+        error_detail = f"Error retrieving all game configurations: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)  # Log para debugging
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving all game configurations: {str(e)}"
