@@ -773,6 +773,11 @@ async def get_card_by_marvelcdb_code(code: str):
     """
     Busca una carta por su código de MarvelCDB (code, no id).
     El frontend usa el campo 'code' de MarvelCDB como identificador único.
+    
+    Estrategia de búsqueda:
+    1. Buscar por marvelcdb_code (si existe la columna)
+    2. Si no encuentra, buscar por id (convertir code a int, ej: "01001" -> 1001)
+    3. Si aún no encuentra, buscar por id como string (para códigos con letras como "50035a")
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -781,32 +786,57 @@ async def get_card_by_marvelcdb_code(code: str):
     cursor.execute("PRAGMA table_info(cards)")
     columns = [column[1] for column in cursor.fetchall()]
     
+    row = None
+    
     if 'marvelcdb_code' in columns:
-        # Buscar por marvelcdb_code (método preferido)
+        # 1. Buscar por marvelcdb_code (método preferido)
         cursor.execute('''
             SELECT id, name, aspect, type, cost, set_name, deck_limit, marvelcdb_code
             FROM cards 
             WHERE marvelcdb_code = ?
         ''', (code,))
-    else:
-        # Fallback: buscar por id (convertir code a id)
+        row = cursor.fetchone()
+    
+    # 2. Si no se encontró, intentar buscar por id (convertir code a int)
+    if not row:
         try:
-            card_id = int(code) if code.isdigit() else abs(hash(code)) % 1000000
+            # Intentar convertir el code a int (ej: "01001" -> 1001, "12013" -> 12013)
+            # Esto funciona porque en init_all.py convertimos code a int para el id
+            if code.isdigit():
+                card_id = int(code)
+            else:
+                # Si tiene letras (ej: "50035a"), intentar extraer el número
+                import re
+                numbers = re.findall(r'\d+', code)
+                if numbers:
+                    card_id = int(numbers[0])
+                else:
+                    card_id = abs(hash(code)) % 1000000
         except:
             card_id = abs(hash(code)) % 1000000
+        
         cursor.execute('''
             SELECT id, name, aspect, type, cost, set_name, deck_limit
             FROM cards 
             WHERE id = ?
         ''', (card_id,))
+        row = cursor.fetchone()
     
-    row = cursor.fetchone()
+    # 3. Si aún no se encontró y el code tiene letras, buscar por id como string
+    if not row and not code.isdigit():
+        cursor.execute('''
+            SELECT id, name, aspect, type, cost, set_name, deck_limit
+            FROM cards 
+            WHERE CAST(id AS TEXT) = ?
+        ''', (code,))
+        row = cursor.fetchone()
+    
     conn.close()
     
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Carta no encontrada"
+            detail=f"Carta no encontrada con código: {code}"
         )
     
     # Construir respuesta según si tiene marvelcdb_code o no
@@ -819,7 +849,7 @@ async def get_card_by_marvelcdb_code(code: str):
             "cost": row[4],
             "set": row[5],
             "max_quantity": (row[6] if row[6] is not None else 3),
-            "marvelcdb_code": row[7]
+            "marvelcdb_code": row[7] if row[7] else code  # Si es NULL, usar el code buscado
         }
     else:
         card = {
@@ -829,7 +859,8 @@ async def get_card_by_marvelcdb_code(code: str):
             "type": row[3],
             "cost": row[4],
             "set": row[5],
-            "max_quantity": (row[6] if row[6] is not None else 3)
+            "max_quantity": (row[6] if row[6] is not None else 3),
+            "marvelcdb_code": code  # Añadir el code buscado para que el frontend lo tenga
         }
     
     # Devolver en el formato esperado por el frontend
