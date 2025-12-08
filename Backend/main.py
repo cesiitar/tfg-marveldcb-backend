@@ -2447,6 +2447,9 @@ async def get_user_decks(request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_detail = f"Error in get_user_decks: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)  # Log para debugging
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
