@@ -51,7 +51,8 @@ def initialize_database():
             threat INTEGER,              -- Amenaza para schemes
             traits TEXT,                 -- Traits de la carta
             text TEXT,                   -- Texto de la carta
-            is_unique BOOLEAN DEFAULT 0   -- Si la carta es única
+            is_unique BOOLEAN DEFAULT 0,   -- Si la carta es única
+            marvelcdb_code VARCHAR(20)    -- Código de MarvelCDB (ej: "01001", "12013")
         )
     ''')
     
