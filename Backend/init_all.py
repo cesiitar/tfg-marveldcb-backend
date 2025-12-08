@@ -267,12 +267,15 @@ def import_cards(cards_data: List[Dict[str, Any]]):
             else:
                 card_id = abs(hash(card_id)) % 1000000
             
+            # Obtener el code original de MarvelCDB (como string para preservar ceros a la izquierda)
+            marvelcdb_code = str(card_data.get('code', ''))
+            
             cursor.execute('''
                 INSERT INTO cards (
                     id, name, aspect, type, cost, set_name, set_code,
-                    pack_code, pack_name, faction_code, type_code, card_set, quantity, deck_limit
+                    pack_code, pack_name, faction_code, type_code, card_set, quantity, deck_limit, marvelcdb_code
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 card_id,
                 card_data.get('name', ''),
@@ -287,7 +290,8 @@ def import_cards(cards_data: List[Dict[str, Any]]):
                 card_data.get('type_code', ''),
                 card_data.get('card_set_name'),  # Set real de la API (puede ser NULL)
                 card_data.get('quantity', 1),     # Cantidad real de la API
-                int(card_data.get('deck_limit')) if str(card_data.get('deck_limit', '')).isdigit() else None
+                int(card_data.get('deck_limit')) if str(card_data.get('deck_limit', '')).isdigit() else None,
+                marvelcdb_code  # Código de MarvelCDB (ej: "01001", "12013")
             ))
             imported_count += 1
             
@@ -446,13 +450,24 @@ def import_villains_and_encounters():
                     set_code = 'wc'
                 # Añadir más mapeos según sea necesario
                 
+                # Obtener el code original de MarvelCDB (como string para preservar ceros a la izquierda)
+                marvelcdb_code = str(card.get('code', ''))
+                
+                # Convertir code a entero para id
+                card_id = card.get('code', '')
+                if card_id and str(card_id).isdigit():
+                    card_id = int(card_id)
+                else:
+                    card_id = abs(hash(str(card_id))) % 1000000
+                
                 cursor.execute('''
                     INSERT OR REPLACE INTO cards (
-                        name, cost, type, aspect, pack_name, quantity, 
-                        deck_limit, card_set, set_code
+                        id, name, cost, type, aspect, pack_name, quantity, 
+                        deck_limit, card_set, set_code, marvelcdb_code
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
+                    card_id,
                     card.get('name', ''),
                     card.get('cost', 0),
                     card.get('type_name', '').lower(),  # Normalizar a minúscula
@@ -461,7 +476,8 @@ def import_villains_and_encounters():
                     card.get('quantity', 1),
                     card.get('deck_limit', None),
                     card.get('card_set_name', pack_name),  # Usar card_set_name de la API, fallback a pack_name
-                    set_code  # Añadir set_code para que el frontend las encuentre
+                    set_code,  # Añadir set_code para que el frontend las encuentre
+                    marvelcdb_code  # Código de MarvelCDB (ej: "01001", "12013")
                 ))
                 
                 imported_count += 1
