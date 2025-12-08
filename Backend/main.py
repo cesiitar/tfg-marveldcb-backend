@@ -114,11 +114,6 @@ def ensure_decks_columns():
 
     altered = False
 
-    # user_id para asociar el mazo al creador
-    if 'user_id' not in columns:
-        cursor.execute('ALTER TABLE decks ADD COLUMN user_id TEXT')
-        altered = True
-
     # hero_name para el héroe del mazo
     if 'hero_name' not in columns:
         cursor.execute('ALTER TABLE decks ADD COLUMN hero_name TEXT')
@@ -160,14 +155,15 @@ def ensure_game_configurations_table():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_configurations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,        -- ID del mazo
             difficulty TEXT NOT NULL,        -- "normal" o "expert"
             villain_id INTEGER NOT NULL,      -- ID del villano (referencia a cards.id)
             result TEXT NOT NULL,            -- "win" o "loss"
             played_at TEXT NOT NULL,         -- Timestamp ISO de cuándo se jugó
             
-            FOREIGN KEY (villain_id) REFERENCES cards(id)
+            FOREIGN KEY (villain_id) REFERENCES cards(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
     
@@ -227,12 +223,13 @@ def ensure_user_favorites_table():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,         -- ID del mazo favorito
             created_at TEXT DEFAULT (datetime('now', 'localtime')),  -- Cuándo se marcó como favorito
             
             -- Restricciones importantes:
             UNIQUE(user_id, deck_id),         -- Evitar duplicados
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,  -- Si se elimina un usuario, se eliminan sus favoritos
             FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE  -- Si se elimina un mazo, se eliminan sus favoritos
         )
     ''')

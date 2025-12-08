@@ -102,13 +102,14 @@ def initialize_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_configurations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,
             difficulty TEXT NOT NULL,
             villain_id INTEGER NOT NULL,
             result TEXT NOT NULL,
             played_at TEXT NOT NULL,
-            FOREIGN KEY (villain_id) REFERENCES cards(id)
+            FOREIGN KEY (villain_id) REFERENCES cards(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
     
@@ -116,10 +117,11 @@ def initialize_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
             UNIQUE(user_id, deck_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
         )
     ''')
