@@ -14,13 +14,8 @@ from typing import List, Dict, Any
 # URL base de la API de MarvelCDB
 API_BASE_URL = "https://marvelcdb.com/api/public"
 
-def get_db_connection():
-    """Conectar a la base de datos SQLite"""
-    # Usar variable de entorno si existe (para producción), sino usar ruta local
-    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Importar utilidades centralizadas de base de datos
+from db_utils import get_db_connection, get_db_path
 
 def initialize_database():
     """Inicializar la base de datos desde cero"""

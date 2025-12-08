@@ -74,13 +74,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_db_connection():
-    """Obtener conexión a la base de datos"""
-    # Usar variable de entorno si existe (para producción), sino usar ruta local
-    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
-    return conn
+# Importar utilidades centralizadas de base de datos
+from db_utils import get_db_connection, get_db_path, verify_tables_exist
+
+# get_db_connection ya está importado de db_utils arriba
 
 def init_users_table():
     """Inicializar tabla de usuarios si no existe"""
