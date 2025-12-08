@@ -1342,6 +1342,10 @@ def train_model_in_background():
     Función que se ejecuta en segundo plano para entrenar el modelo después de subir una partida.
     """
     try:
+        # Asegurar que las tablas necesarias existan antes de entrenar
+        ensure_game_configurations_table()
+        ensure_decks_columns()
+        
         print("🔄 Iniciando entrenamiento automático del modelo después de nueva partida...")
         model = train_villain_recommender()
         if model:
@@ -1350,6 +1354,8 @@ def train_model_in_background():
             print("⚠️  No se pudo entrenar el modelo (puede ser por falta de datos)")
     except Exception as e:
         print(f"❌ Error entrenando modelo en segundo plano: {str(e)}")
+        import traceback
+        print(f"📋 Traceback completo:\n{traceback.format_exc()}")
         # No lanzamos excepción para no afectar la respuesta al usuario
 
 @app.post("/api/game-configurations", status_code=201)
