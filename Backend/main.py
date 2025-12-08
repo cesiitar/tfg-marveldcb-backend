@@ -167,10 +167,13 @@ def ensure_game_configurations_table():
         )
     ''')
     
-    # Verificar si existe la columna 'villain' (nombre) para migrar datos
+    # Verificar columnas existentes para migraciones
     cursor.execute("PRAGMA table_info(game_configurations)")
-    columns = [column[1] for column in cursor.fetchall()]
+    columns_info = cursor.fetchall()
+    columns = [col[1] for col in columns_info]
+    column_types = {col[1]: col[2] for col in columns_info}  # nombre: tipo
     
+    # Migrar villain (nombre) a villain_id (ID) si es necesario
     if 'villain' in columns and 'villain_id' not in columns:
         # Migrar datos de villain (nombre) a villain_id (ID)
         print("🔄 Migrando datos de villain (nombre) a villain_id (ID)...")
@@ -208,6 +211,61 @@ def ensure_game_configurations_table():
         
         print(f"✅ Migrados {migrated_count} registros de game_configurations")
     
+    # Migrar user_id de TEXT a INTEGER si es necesario
+    if 'user_id' in columns and column_types.get('user_id', '').upper() == 'TEXT':
+        print("🔄 Migrando user_id de TEXT a INTEGER...")
+        
+        # Crear tabla temporal con estructura correcta
+        cursor.execute('''
+            CREATE TABLE game_configurations_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                deck_id INTEGER NOT NULL,
+                difficulty TEXT NOT NULL,
+                villain_id INTEGER NOT NULL,
+                result TEXT NOT NULL,
+                played_at TEXT NOT NULL,
+                FOREIGN KEY (villain_id) REFERENCES cards(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # Migrar datos: convertir user_id TEXT a INTEGER
+        # Si user_id es un número como texto, lo convertimos
+        # Si es auth0_id, necesitamos buscar el ID numérico del usuario
+        cursor.execute('SELECT id, user_id, deck_id, difficulty, villain_id, result, played_at FROM game_configurations')
+        existing_configs = cursor.fetchall()
+        
+        migrated_count = 0
+        for config in existing_configs:
+            config_id, old_user_id, deck_id, difficulty, villain_id, result, played_at = config
+            
+            # Intentar convertir directamente si es un número
+            try:
+                new_user_id = int(old_user_id)
+            except (ValueError, TypeError):
+                # Si no es un número, buscar por auth0_id
+                cursor.execute('SELECT id FROM users WHERE auth0_id = ? LIMIT 1', (old_user_id,))
+                user_row = cursor.fetchone()
+                if user_row:
+                    new_user_id = user_row[0]
+                else:
+                    print(f"⚠️ No se encontró usuario con auth0_id: {old_user_id}, saltando registro {config_id}")
+                    continue
+            
+            cursor.execute('''
+                INSERT INTO game_configurations_new 
+                (id, user_id, deck_id, difficulty, villain_id, result, played_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (config_id, new_user_id, deck_id, difficulty, villain_id, result, played_at))
+            migrated_count += 1
+        
+        # Reemplazar tabla antigua por la nueva
+        cursor.execute('DROP TABLE game_configurations')
+        cursor.execute('ALTER TABLE game_configurations_new RENAME TO game_configurations')
+        
+        print(f"✅ Migrados {migrated_count} registros de game_configurations (user_id TEXT -> INTEGER)")
+    
     conn.commit()
     conn.close()
 
@@ -233,6 +291,60 @@ def ensure_user_favorites_table():
             FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE  -- Si se elimina un mazo, se eliminan sus favoritos
         )
     ''')
+    
+    # Verificar si user_id es TEXT y migrar a INTEGER si es necesario
+    cursor.execute("PRAGMA table_info(user_favorites)")
+    columns_info = cursor.fetchall()
+    column_types = {col[1]: col[2] for col in columns_info}  # nombre: tipo
+    
+    if 'user_id' in column_types and column_types.get('user_id', '').upper() == 'TEXT':
+        print("🔄 Migrando user_favorites.user_id de TEXT a INTEGER...")
+        
+        # Crear tabla temporal con estructura correcta
+        cursor.execute('''
+            CREATE TABLE user_favorites_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                deck_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(user_id, deck_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Migrar datos
+        cursor.execute('SELECT id, user_id, deck_id, created_at FROM user_favorites')
+        existing_favorites = cursor.fetchall()
+        
+        migrated_count = 0
+        for fav in existing_favorites:
+            fav_id, old_user_id, deck_id, created_at = fav
+            
+            # Intentar convertir directamente si es un número
+            try:
+                new_user_id = int(old_user_id)
+            except (ValueError, TypeError):
+                # Si no es un número, buscar por auth0_id
+                cursor.execute('SELECT id FROM users WHERE auth0_id = ? LIMIT 1', (old_user_id,))
+                user_row = cursor.fetchone()
+                if user_row:
+                    new_user_id = user_row[0]
+                else:
+                    print(f"⚠️ No se encontró usuario con auth0_id: {old_user_id}, saltando favorito {fav_id}")
+                    continue
+            
+            cursor.execute('''
+                INSERT INTO user_favorites_new (id, user_id, deck_id, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (fav_id, new_user_id, deck_id, created_at))
+            migrated_count += 1
+        
+        # Reemplazar tabla antigua por la nueva
+        cursor.execute('DROP TABLE user_favorites')
+        cursor.execute('ALTER TABLE user_favorites_new RENAME TO user_favorites')
+        
+        print(f"✅ Migrados {migrated_count} registros de user_favorites (user_id TEXT -> INTEGER)")
     
     conn.commit()
     conn.close()
@@ -1351,7 +1463,16 @@ async def get_game_configurations(request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Verificar si hay partidas antes de hacer JOINs
+        cursor.execute('SELECT COUNT(*) FROM game_configurations WHERE user_id = ?', (user['id'],))
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            conn.close()
+            return {"games": []}
+        
         # Obtener partidas del usuario con información del mazo, villano y creador
+        # Usar LEFT JOIN para evitar errores si faltan datos
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1363,11 +1484,11 @@ async def get_game_configurations(request: Request):
                 d.name as deck_name,
                 d.hero_name,
                 d.aspect,
-                c.card_set as villain_name,
+                COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
                 u.name as creator_name
             FROM game_configurations gc
-            JOIN decks d ON gc.deck_id = d.id
-            JOIN cards c ON gc.villain_id = c.id
+            LEFT JOIN decks d ON gc.deck_id = d.id
+            LEFT JOIN cards c ON gc.villain_id = c.id
             LEFT JOIN users u ON d.user_id = u.id
             WHERE gc.user_id = ?
             ORDER BY gc.played_at DESC
@@ -1378,15 +1499,15 @@ async def get_game_configurations(request: Request):
             game = {
                 "id": row["id"],
                 "deck_id": row["deck_id"],
-                "deck_name": row["deck_name"],
-                "hero_name": row["hero_name"],
-                "aspect": row["aspect"],
+                "deck_name": row["deck_name"] if row["deck_name"] else "Unknown",
+                "hero_name": row["hero_name"] if row["hero_name"] else "Unknown",
+                "aspect": row["aspect"] if row["aspect"] else "Unknown",
                 "villain_id": row["villain_id"],
-                "villain_name": row["villain_name"],
+                "villain_name": row["villain_name"] if row["villain_name"] else "Unknown",
                 "difficulty": row["difficulty"],
                 "result": row["result"],
                 "played_at": row["played_at"],
-                "creator_name": row["creator_name"]
+                "creator_name": row["creator_name"] if row["creator_name"] else None
             }
             games.append(game)
         
@@ -1397,6 +1518,9 @@ async def get_game_configurations(request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_detail = f"Error retrieving game configurations: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)  # Log para debugging
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving game configurations: {str(e)}"
