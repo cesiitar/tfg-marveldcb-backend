@@ -99,6 +99,7 @@ def initialize_database():
     ''')
     
     # Tabla game_configurations (partidas)
+    # NOTA: user_id es INTEGER (ID numérico del usuario), no TEXT
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_configurations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +114,7 @@ def initialize_database():
     ''')
     
     # Tabla user_favorites (favoritos)
+    # NOTA: user_id es INTEGER (ID numérico del usuario), no TEXT
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

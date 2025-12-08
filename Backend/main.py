@@ -160,7 +160,7 @@ def ensure_game_configurations_table():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_configurations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,        -- ID del mazo
             difficulty TEXT NOT NULL,        -- "normal" o "expert"
             villain_id INTEGER NOT NULL,      -- ID del villano (referencia a cards.id)
@@ -227,7 +227,7 @@ def ensure_user_favorites_table():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,           -- auth0_sub del usuario
+            user_id INTEGER NOT NULL,        -- ID numérico del usuario (de la tabla users)
             deck_id INTEGER NOT NULL,         -- ID del mazo favorito
             created_at TEXT DEFAULT (datetime('now', 'localtime')),  -- Cuándo se marcó como favorito
             
