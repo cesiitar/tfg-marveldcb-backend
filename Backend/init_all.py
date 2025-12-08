@@ -8,6 +8,7 @@ import requests
 import sqlite3
 import json
 import time
+import os
 from typing import List, Dict, Any
 
 # URL base de la API de MarvelCDB
@@ -15,19 +16,22 @@ API_BASE_URL = "https://marvelcdb.com/api/public"
 
 def get_db_connection():
     """Conectar a la base de datos SQLite"""
-    conn = sqlite3.connect('marvel_cards.db')
+    # Usar variable de entorno si existe (para producción), sino usar ruta local
+    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def initialize_database():
     """Inicializar la base de datos desde cero"""
     print("🗑️ Eliminando base de datos anterior...")
-    import os
-    if os.path.exists('marvel_cards.db'):
-        os.remove('marvel_cards.db')
+    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
+    if os.path.exists(db_path):
+        os.remove(db_path)
     
     print("📋 Creando estructura de base de datos...")
-    conn = sqlite3.connect('marvel_cards.db')
+    db_path = os.getenv('DB_PATH', 'marvel_cards.db')
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     # Tabla cards con información completa (incluyendo encounter cards)
