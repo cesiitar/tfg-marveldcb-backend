@@ -99,11 +99,10 @@ def initialize_database():
     ''')
     
     # Tabla game_configurations (partidas)
-    # NOTA: user_id es INTEGER (ID numérico del usuario), no TEXT
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_configurations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
             deck_id INTEGER NOT NULL,
             difficulty TEXT NOT NULL,
             villain_id INTEGER NOT NULL,
@@ -114,11 +113,10 @@ def initialize_database():
     ''')
     
     # Tabla user_favorites (favoritos)
-    # NOTA: user_id es INTEGER (ID numérico del usuario), no TEXT
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
             deck_id INTEGER NOT NULL,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
             UNIQUE(user_id, deck_id),
