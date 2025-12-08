@@ -427,42 +427,6 @@ def ensure_cards_columns():
 async def root():
     return {"message": "MarvelCDB API está funcionando!"}
 
-@app.get("/api/users")
-async def get_all_users():
-    """Endpoint temporal para ver todos los usuarios (solo para debugging)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, auth0_id, email, name, picture_url, created_at
-            FROM users
-            ORDER BY created_at DESC
-        ''')
-        
-        users = []
-        for row in cursor.fetchall():
-            users.append({
-                "id": row["id"],
-                "auth0_id": row["auth0_id"],
-                "email": row["email"],
-                "name": row["name"],
-                "picture_url": row["picture_url"],
-                "created_at": row["created_at"]
-            })
-        
-        conn.close()
-        
-        return {
-            "total": len(users),
-            "users": users
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving users: {str(e)}"
-        )
-
 # =============================================================================
 # ENDPOINTS DE SINCRONIZACIÓN DE USUARIOS
 # =============================================================================
