@@ -328,8 +328,8 @@ def import_villains_and_encounters():
     
     print("🔍 Importando villanos y encounter cards a la tabla cards...")
     
-    # Conectar a la base de datos
-    conn = sqlite3.connect('marvel_cards.db')
+    # Conectar a la base de datos usando la función que respeta DB_PATH
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # URL para encounter cards (incluye villanos)
