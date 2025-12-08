@@ -19,6 +19,16 @@ app = FastAPI(title="MarvelCDB API", version="1.0.0")
 # Registrar rutas de recomendaciones
 app.include_router(recommendations_router, prefix="/api", tags=["recommendations"])
 
+# Inicializar tablas al arrancar la aplicación
+@app.on_event("startup")
+async def startup_event():
+    """Inicializar tablas necesarias al arrancar la aplicación"""
+    init_users_table()
+    ensure_decks_columns()
+    ensure_game_configurations_table()
+    ensure_user_favorites_table()
+    ensure_deck_comments_table()
+
 def get_user_by_auth0_id(auth0_id: str):
     """Helper function to get user by Auth0 ID"""
     if not auth0_id:
