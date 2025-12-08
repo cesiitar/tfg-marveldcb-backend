@@ -7,7 +7,12 @@ import os
 
 def get_db_path():
     """Obtiene la ruta a la base de datos"""
-    # Obtener el directorio del script actual
+    # Usar la misma lógica que main.py: respetar DB_PATH si está definido
+    db_path = os.getenv('DB_PATH')
+    if db_path:
+        return db_path
+    
+    # Si no hay DB_PATH, usar la ruta por defecto
     current_dir = os.path.dirname(os.path.abspath(__file__))
     # Subir dos niveles: ml/data -> Backend
     backend_dir = os.path.dirname(os.path.dirname(current_dir))
@@ -25,6 +30,18 @@ def get_game_data_from_db(db_path: str = None) -> pd.DataFrame:
         db_path = get_db_path()
     
     conn = sqlite3.connect(db_path)
+    
+    # Verificar que las tablas existan antes de hacer la consulta
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='game_configurations'")
+    if not cursor.fetchone():
+        conn.close()
+        raise ValueError("La tabla 'game_configurations' no existe. Asegúrate de que la base de datos esté inicializada.")
+    
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='decks'")
+    if not cursor.fetchone():
+        conn.close()
+        raise ValueError("La tabla 'decks' no existe. Asegúrate de que la base de datos esté inicializada.")
     
     query = """
     SELECT 
