@@ -2479,12 +2479,20 @@ async def get_user_favorites(request: Request):
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Verificar si el usuario tiene favoritos antes de hacer JOINs
+        cursor.execute('SELECT COUNT(*) FROM user_favorites WHERE user_id = ?', (user["id"],))
+        favorites_count = cursor.fetchone()[0]
+        
+        if favorites_count == 0:
+            conn.close()
+            return {"favorites": []}
+        
         # Obtener mazos favoritos del usuario con conteo de favoritos
         cursor.execute('''
             SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at as favorited_at,
                    COALESCE(COUNT(DISTINCT uf2.id), 0) as favorite_count
-            FROM decks d
-            JOIN user_favorites uf ON d.id = uf.deck_id
+            FROM user_favorites uf
+            LEFT JOIN decks d ON uf.deck_id = d.id
             LEFT JOIN user_favorites uf2 ON d.id = uf2.deck_id
             WHERE uf.user_id = ?
             GROUP BY d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, uf.created_at
@@ -2556,6 +2564,9 @@ async def get_user_favorites(request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_detail = f"Error in get_user_favorites: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)  # Log para debugging
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
