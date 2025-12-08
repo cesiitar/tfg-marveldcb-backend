@@ -8,19 +8,11 @@ import sqlite3
 import json
 import random
 
-def get_db_connection():
-    """Obtener conexión a la base de datos"""
-    # Usar variable de entorno si existe (para producción), sino usar ruta relativa
-    db_path = os.getenv('DB_PATH')
-    if not db_path:
-        # Ruta relativa para desarrollo
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_dir = os.path.dirname(os.path.dirname(current_dir))
-        db_path = os.path.join(backend_dir, 'marvel_cards.db')
-    
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
-    return conn
+# Importar utilidades centralizadas de base de datos
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from db_utils import get_db_connection
 
 router = APIRouter()
 

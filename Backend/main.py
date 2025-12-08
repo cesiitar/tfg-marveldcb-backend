@@ -1340,9 +1340,13 @@ async def create_deck(deck_data: dict, request: Request):
 def train_model_in_background():
     """
     Función que se ejecuta en segundo plano para entrenar el modelo después de subir una partida.
+    
+    NOTA: Las tablas se verifican automáticamente en get_game_data_from_db() usando
+    verify_tables_exist(), que es más robusto que llamar ensure_* manualmente.
     """
     try:
         # Asegurar que las tablas necesarias existan antes de entrenar
+        # (esto es redundante pero defensivo - get_game_data_from_db también verifica)
         ensure_game_configurations_table()
         ensure_decks_columns()
         
