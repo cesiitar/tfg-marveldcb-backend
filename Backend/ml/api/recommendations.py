@@ -24,7 +24,7 @@ def get_model_path():
 
     return os.path.join(
         os.path.dirname(__file__), 
-        '..', 'saved_models', 'model.pkl'
+        '..', 'saved_models', 'villain_svm_model.pkl'
     )
 
 MODEL_PATH = get_model_path()

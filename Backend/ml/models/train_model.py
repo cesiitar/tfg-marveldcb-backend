@@ -12,7 +12,7 @@ def get_default_model_path() -> str:
     """
     Ruta del modelo:
     1. Si existe MODEL_PATH, se usa tal cual.
-    2. Si no, se guarda localmente en ml/saved_models/model.pkl (para desarrollo).
+    2. Si no, se guarda localmente en ml/saved_models/villain_svm_model.pkl (para desarrollo).
     """
     env_model_path = os.getenv("MODEL_PATH")
     if env_model_path:
@@ -20,7 +20,7 @@ def get_default_model_path() -> str:
 
     model_dir = os.path.join(os.path.dirname(__file__), '..', 'saved_models')
     os.makedirs(model_dir, exist_ok=True)
-    return os.path.join(model_dir, 'model.pkl')
+    return os.path.join(model_dir, 'villain_svm_model.pkl')
 
 
 def train_villain_recommender(db_path: str = None, model_path: str = None):
