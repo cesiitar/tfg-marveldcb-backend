@@ -15,15 +15,30 @@ from db_utils import get_db_connection
 
 def delete_model():
     """Eliminar el modelo SVM entrenado"""
-    model_path = os.path.join('ml', 'saved_models', 'villain_svm_model.pkl')
+    # Buscar el modelo en la ruta relativa desde este script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    if os.path.exists(model_path):
-        os.remove(model_path)
-        print(f"✅ Modelo SVM eliminado: {model_path}")
-        return True
-    else:
-        print(f"ℹ️  No se encontró modelo SVM en: {model_path}")
-        return False
+    # Intentar múltiples rutas posibles
+    possible_paths = [
+        os.path.join(script_dir, 'ml', 'saved_models', 'villain_svm_model.pkl'),
+        os.path.join(script_dir, 'saved_models', 'villain_svm_model.pkl'),
+        os.path.join('ml', 'saved_models', 'villain_svm_model.pkl'),
+        os.path.join('saved_models', 'villain_svm_model.pkl'),
+    ]
+    
+    for model_path in possible_paths:
+        if os.path.exists(model_path):
+            os.remove(model_path)
+            print(f"✅ Modelo SVM eliminado: {model_path}")
+            return True
+    
+    # Si no se encontró, mostrar todas las rutas que se intentaron
+    print(f"ℹ️  No se encontró modelo SVM. Rutas buscadas:")
+    for path in possible_paths:
+        abs_path = os.path.abspath(path)
+        exists = "✓" if os.path.exists(path) else "✗"
+        print(f"   {exists} {abs_path}")
+    return False
 
 def delete_test_data():
     """Eliminar todos los datos de prueba (mazos y partidas)"""
