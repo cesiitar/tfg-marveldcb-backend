@@ -114,12 +114,3 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
     
     return model_data
 
-if __name__ == '__main__':
-    # Entrenar modelo
-    model = train_villain_recommender()
-    
-    if model:
-        print("\n🎉 Modelo entrenado exitosamente!")
-    else:
-        print("\n❌ Error al entrenar el modelo")
-

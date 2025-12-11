@@ -171,35 +171,6 @@ class DeckGenerationRequest(BaseModel):
     patches: Optional[List[str]] = []  # Por ahora vacío, se implementará después
     max_decks: Optional[int] = 3  # Número máximo de mazos a generar (por defecto 3, máximo 4)
 
-@router.post("/recommendations/train", status_code=200)
-async def train_model_endpoint(
-    x_auth0_id: Optional[str] = Header(None, alias="X-Auth0-ID")
-):
-    """
-    Endpoint para entrenar el modelo (útil para reentrenar periódicamente)
-    """
-    try:
-        from ml.models.train_model import train_villain_recommender
-        
-        model = train_villain_recommender()
-        
-        if model:
-            return {
-                "message": "Modelo entrenado exitosamente",
-                "status": "success",
-                "model_path": MODEL_PATH
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Error al entrenar el modelo. Verifica que haya datos de partidas disponibles."
-            )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al entrenar el modelo: {str(e)}"
-        )
-
 def get_villain_name(villain_id: int) -> Optional[str]:
     """
     Obtiene el nombre de un villano por su ID (card_set)
