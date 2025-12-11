@@ -11,16 +11,12 @@ from data.prepare_data import get_training_data, get_db_path
 def get_default_model_path() -> str:
     """
     Ruta del modelo:
-    1. Si existe MODEL_PATH, se usa tal cual.
-    2. Si no, se guarda localmente en ml/saved_models/villain_svm_model.pkl (para desarrollo).
+    - Requiere MODEL_PATH. Si no está definida, se lanza ValueError.
     """
     env_model_path = os.getenv("MODEL_PATH")
-    if env_model_path:
-        return env_model_path
-
-    model_dir = os.path.join(os.path.dirname(__file__), '..', 'saved_models')
-    os.makedirs(model_dir, exist_ok=True)
-    return os.path.join(model_dir, 'villain_svm_model.pkl')
+    if not env_model_path:
+        raise ValueError("MODEL_PATH environment variable is required to save/load the model")
+    return env_model_path
 
 
 def train_villain_recommender(db_path: str = None, model_path: str = None):

@@ -21,13 +21,9 @@ def get_possible_model_paths():
     env_model_path = os.getenv("MODEL_PATH")
     if env_model_path:
         paths.append(env_model_path)
-
-    # Rutas relativas habituales
-    paths.append(os.path.join(script_dir, 'ml', 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join(script_dir, 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join('ml', 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join('saved_models', 'villain_svm_model.pkl'))
-
+    else:
+        # Si no hay env, avisar que no hay rutas configuradas
+        print("ℹ️  MODEL_PATH no está definido; no hay rutas adicionales para buscar el modelo.")
     return paths
 
 

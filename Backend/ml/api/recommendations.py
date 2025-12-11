@@ -19,13 +19,9 @@ router = APIRouter()
 # Path al modelo entrenado (persistente si existe /data o se define MODEL_PATH)
 def get_model_path():
     env_model_path = os.getenv("MODEL_PATH")
-    if env_model_path:
-        return env_model_path
-
-    return os.path.join(
-        os.path.dirname(__file__), 
-        '..', 'saved_models', 'villain_svm_model.pkl'
-    )
+    if not env_model_path:
+        raise RuntimeError("MODEL_PATH environment variable is required to load the model")
+    return env_model_path
 
 MODEL_PATH = get_model_path()
 
