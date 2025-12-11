@@ -13,27 +13,38 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_utils import get_db_connection
 
+def get_possible_model_paths():
+    """Posibles ubicaciones del modelo, priorizando volumen persistente."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    paths = []
+
+    env_model_path = os.getenv("MODEL_PATH")
+    if env_model_path:
+        paths.append(env_model_path)
+
+    # Volumen persistente en Render
+    paths.append(os.path.join("/data", "saved_models", "villain_svm_model.pkl"))
+
+    # Rutas relativas habituales
+    paths.append(os.path.join(script_dir, 'ml', 'saved_models', 'villain_svm_model.pkl'))
+    paths.append(os.path.join(script_dir, 'saved_models', 'villain_svm_model.pkl'))
+    paths.append(os.path.join('ml', 'saved_models', 'villain_svm_model.pkl'))
+    paths.append(os.path.join('saved_models', 'villain_svm_model.pkl'))
+
+    return paths
+
+
 def delete_model():
     """Eliminar el modelo SVM entrenado"""
-    # Buscar el modelo en la ruta relativa desde este script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Intentar múltiples rutas posibles
-    possible_paths = [
-        os.path.join(script_dir, 'ml', 'saved_models', 'villain_svm_model.pkl'),
-        os.path.join(script_dir, 'saved_models', 'villain_svm_model.pkl'),
-        os.path.join('ml', 'saved_models', 'villain_svm_model.pkl'),
-        os.path.join('saved_models', 'villain_svm_model.pkl'),
-    ]
-    
+    possible_paths = get_possible_model_paths()
+
     for model_path in possible_paths:
         if os.path.exists(model_path):
             os.remove(model_path)
             print(f"✅ Modelo SVM eliminado: {model_path}")
             return True
     
-    # Si no se encontró, mostrar todas las rutas que se intentaron
-    print(f"ℹ️  No se encontró modelo SVM. Rutas buscadas:")
+    print("ℹ️  No se encontró modelo SVM. Rutas buscadas:")
     for path in possible_paths:
         abs_path = os.path.abspath(path)
         exists = "✓" if os.path.exists(path) else "✗"
