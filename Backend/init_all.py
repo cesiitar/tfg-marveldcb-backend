@@ -105,7 +105,8 @@ def initialize_database():
             result TEXT NOT NULL,
             played_at TEXT NOT NULL,
             FOREIGN KEY (villain_id) REFERENCES cards(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,  -- Si se elimina un usuario, se eliminan sus partidas
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE  -- Si se elimina un mazo, se eliminan sus partidas
         )
     ''')
     

@@ -7,12 +7,11 @@ Script para eliminar completamente el entrenamiento de IA y empezar de 0:
 
 import sqlite3
 import os
+import sys
 
-def get_db_connection():
-    """Obtener conexión a la base de datos"""
-    conn = sqlite3.connect('marvel_cards.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+# Añadir path para importar db_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from db_utils import get_db_connection
 
 def delete_model():
     """Eliminar el modelo SVM entrenado"""
@@ -85,6 +84,48 @@ def delete_test_data():
     print(f"   - Usuario eliminado: {user_deleted}")
     
     return decks_deleted, games_deleted
+
+def delete_all_production_data():
+    """Eliminar TODAS las partidas, TODOS los mazos y el modelo entrenado (para producción)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    print("🗑️  Eliminando TODOS los datos de producción...")
+    print()
+    
+    # 1. Contar antes de eliminar
+    cursor.execute('SELECT COUNT(*) FROM game_configurations')
+    games_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM decks')
+    decks_count = cursor.fetchone()[0]
+    
+    print(f"📊 Datos encontrados:")
+    print(f"   - Partidas: {games_count}")
+    print(f"   - Mazos: {decks_count}")
+    print()
+    
+    # 2. Eliminar partidas primero (por la foreign key)
+    cursor.execute('DELETE FROM game_configurations')
+    games_deleted = cursor.rowcount
+    
+    # 3. Eliminar mazos (esto también eliminará los favoritos por ON DELETE CASCADE)
+    cursor.execute('DELETE FROM decks')
+    decks_deleted = cursor.rowcount
+    
+    conn.commit()
+    conn.close()
+    
+    # 4. Eliminar modelo SVM
+    model_deleted = delete_model()
+    
+    print()
+    print("✅ Datos eliminados:")
+    print(f"   - Partidas eliminadas: {games_deleted}")
+    print(f"   - Mazos eliminados: {decks_deleted}")
+    print(f"   - Modelo SVM: {'Eliminado' if model_deleted else 'No existía'}")
+    
+    return decks_deleted, games_deleted, model_deleted
 
 def reset_ai_training():
     """Eliminar todo y empezar de 0"""

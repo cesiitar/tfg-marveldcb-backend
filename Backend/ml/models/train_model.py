@@ -31,12 +31,16 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
         # Obtener datos de entrenamiento (sin top_cards - ya no se usan)
         X, y, feature_names = get_training_data(db_path, top_cards=None)
     except ValueError as e:
-        print(f"❌ Error: {e}")
+        # No hay datos aún - comportamiento esperado, no mostrar error
         return None
     
-    if len(X) < 10:
-        print(f"⚠️  No hay suficientes datos para entrenar (mínimo 10 partidas, tienes {len(X)})")
+    # Verificar que hay al menos 2 partidas (mínimo para dividir train/test)
+    if len(X) < 2:
         return None
+    
+    # Verificar que hay al menos una victoria y una derrota para usar stratify
+    unique_classes = len(set(y))
+    use_stratify = unique_classes > 1 and len(X) >= 2
     
     print(f"✅ Datos cargados: {len(X)} partidas")
     print(f"   - Features: {len(feature_names)} (4 básicas + 5 características agregadas)")
@@ -44,9 +48,20 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
     print(f"   - Derrotas: {len(y)-sum(y)} ({(len(y)-sum(y))/len(y)*100:.1f}%)")
     
     # Dividir en entrenamiento y prueba (80/20)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    # Usar stratify solo si hay múltiples clases y suficientes datos
+    try:
+        if use_stratify:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+        else:
+            # Sin stratify si solo hay una clase o muy pocos datos
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+    except ValueError as e:
+        # Si falla la división (muy pocos datos), no entrenar silenciosamente
+        return None
     
     print("🤖 Entrenando modelo SVM con características generales...")
     model = SVC(

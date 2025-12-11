@@ -160,7 +160,8 @@ def ensure_game_configurations_table():
             played_at TEXT NOT NULL,         -- Timestamp ISO de cuándo se jugó
             
             FOREIGN KEY (villain_id) REFERENCES cards(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,  -- Si se elimina un usuario, se eliminan sus partidas
+            FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE  -- Si se elimina un mazo, se eliminan sus partidas
         )
     ''')
     
@@ -223,7 +224,8 @@ def ensure_game_configurations_table():
                 result TEXT NOT NULL,
                 played_at TEXT NOT NULL,
                 FOREIGN KEY (villain_id) REFERENCES cards(id),
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
             )
         ''')
         
@@ -1347,12 +1349,11 @@ def train_model_in_background():
         ensure_game_configurations_table()
         ensure_decks_columns()
         
-        print("🔄 Iniciando entrenamiento automático del modelo después de nueva partida...")
+        # Entrenar modelo en segundo plano (silenciosamente si no hay suficientes datos)
         model = train_villain_recommender()
         if model:
             print("✅ Modelo entrenado exitosamente en segundo plano")
-        else:
-            print("⚠️  No se pudo entrenar el modelo (puede ser por falta de datos)")
+        # Si no hay suficientes datos, es comportamiento esperado - no mostrar mensaje
     except Exception as e:
         print(f"❌ Error entrenando modelo en segundo plano: {str(e)}")
         import traceback
@@ -1510,7 +1511,7 @@ async def get_game_configurations(request: Request):
             return {"games": []}
         
         # Obtener partidas del usuario con información del mazo, villano y creador
-        # Usar LEFT JOIN para evitar errores si faltan datos
+        # Filtrar partidas cuyo mazo aún existe (evitar partidas huérfanas)
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1525,7 +1526,7 @@ async def get_game_configurations(request: Request):
                 COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
                 u.name as creator_name
             FROM game_configurations gc
-            LEFT JOIN decks d ON gc.deck_id = d.id
+            INNER JOIN decks d ON gc.deck_id = d.id
             LEFT JOIN cards c ON gc.villain_id = c.id
             LEFT JOIN users u ON d.user_id = u.id
             WHERE gc.user_id = ?
@@ -1582,7 +1583,7 @@ async def get_all_game_configurations():
             return {"games": []}
         
         # Obtener todas las partidas con información del mazo, villano y creador
-        # Usar LEFT JOIN para evitar errores si faltan datos
+        # Filtrar partidas cuyo mazo aún existe (evitar partidas huérfanas)
         cursor.execute('''
             SELECT 
                 gc.id,
@@ -1598,7 +1599,7 @@ async def get_all_game_configurations():
                 COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
                 u.name as creator_name
             FROM game_configurations gc
-            LEFT JOIN decks d ON gc.deck_id = d.id
+            INNER JOIN decks d ON gc.deck_id = d.id
             LEFT JOIN cards c ON gc.villain_id = c.id
             LEFT JOIN users u ON d.user_id = u.id
             ORDER BY gc.played_at DESC
@@ -2963,7 +2964,19 @@ async def delete_deck(deck_id: int, request: Request):
                 detail="Deck not found or does not belong to user"
             )
         
-        # Eliminar el mazo
+        # Contar partidas asociadas antes de eliminar
+        cursor.execute('SELECT COUNT(*) FROM game_configurations WHERE deck_id = ?', (deck_id,))
+        games_count = cursor.fetchone()[0]
+        
+        # Eliminar partidas asociadas al mazo
+        cursor.execute('DELETE FROM game_configurations WHERE deck_id = ?', (deck_id,))
+        games_deleted = cursor.rowcount
+        
+        # Eliminar comentarios asociados al mazo (si existen)
+        cursor.execute('DELETE FROM deck_comments WHERE deck_id = ?', (deck_id,))
+        comments_deleted = cursor.rowcount
+        
+        # Eliminar el mazo (esto también eliminará los favoritos por ON DELETE CASCADE)
         cursor.execute('DELETE FROM decks WHERE id = ? AND user_id = ?', (deck_id, user["id"]))
         
         conn.commit()
@@ -2971,7 +2984,9 @@ async def delete_deck(deck_id: int, request: Request):
         
         return {
             "message": "Deck deleted successfully",
-            "deck_id": deck_id
+            "deck_id": deck_id,
+            "games_deleted": games_deleted,
+            "comments_deleted": comments_deleted
         }
         
     except HTTPException:

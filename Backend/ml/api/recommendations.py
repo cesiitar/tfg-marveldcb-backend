@@ -185,7 +185,7 @@ async def train_model_endpoint(
         else:
             raise HTTPException(
                 status_code=500,
-                detail="Error al entrenar el modelo. Verifica que haya suficientes datos de partidas (mínimo 10)."
+                detail="Error al entrenar el modelo. Verifica que haya datos de partidas disponibles."
             )
     except Exception as e:
         raise HTTPException(
