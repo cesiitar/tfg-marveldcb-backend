@@ -10,24 +10,17 @@ from data.prepare_data import get_training_data, get_db_path
 
 def get_default_model_path() -> str:
     """
-    Devuelve una ruta para el modelo que persista en producción.
-
-    Prioridad:
-    1. Variable de entorno MODEL_PATH (ruta completa)
-    2. Si existe /data -> usar /data/saved_models/villain_svm_model.pkl (volumen persistente en Render)
-    3. Ruta relativa en el repo: ml/saved_models/villain_svm_model.pkl
+    Ruta del modelo:
+    1. Si existe MODEL_PATH, se usa tal cual.
+    2. Si no, se guarda localmente en ml/saved_models/model.pkl (para desarrollo).
     """
     env_model_path = os.getenv("MODEL_PATH")
     if env_model_path:
         return env_model_path
 
-    if os.path.exists("/data"):
-        os.makedirs("/data/saved_models", exist_ok=True)
-        return os.path.join("/data", "saved_models", "villain_svm_model.pkl")
-
     model_dir = os.path.join(os.path.dirname(__file__), '..', 'saved_models')
     os.makedirs(model_dir, exist_ok=True)
-    return os.path.join(model_dir, 'villain_svm_model.pkl')
+    return os.path.join(model_dir, 'model.pkl')
 
 
 def train_villain_recommender(db_path: str = None, model_path: str = None):

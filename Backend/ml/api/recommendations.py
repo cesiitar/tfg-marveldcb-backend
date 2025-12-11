@@ -21,14 +21,10 @@ def get_model_path():
     env_model_path = os.getenv("MODEL_PATH")
     if env_model_path:
         return env_model_path
-    
-    if os.path.exists("/data"):
-        os.makedirs("/data/saved_models", exist_ok=True)
-        return os.path.join("/data", "saved_models", "villain_svm_model.pkl")
-    
+
     return os.path.join(
         os.path.dirname(__file__), 
-        '..', 'saved_models', 'villain_svm_model.pkl'
+        '..', 'saved_models', 'model.pkl'
     )
 
 MODEL_PATH = get_model_path()

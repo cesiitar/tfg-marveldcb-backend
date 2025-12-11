@@ -22,14 +22,11 @@ def get_possible_model_paths():
     if env_model_path:
         paths.append(env_model_path)
 
-    # Volumen persistente en Render
-    paths.append(os.path.join("/data", "saved_models", "villain_svm_model.pkl"))
-
     # Rutas relativas habituales
-    paths.append(os.path.join(script_dir, 'ml', 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join(script_dir, 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join('ml', 'saved_models', 'villain_svm_model.pkl'))
-    paths.append(os.path.join('saved_models', 'villain_svm_model.pkl'))
+    paths.append(os.path.join(script_dir, 'ml', 'saved_models', 'model.pkl'))
+    paths.append(os.path.join(script_dir, 'saved_models', 'model.pkl'))
+    paths.append(os.path.join('ml', 'saved_models', 'model.pkl'))
+    paths.append(os.path.join('saved_models', 'model.pkl'))
 
     return paths
 
