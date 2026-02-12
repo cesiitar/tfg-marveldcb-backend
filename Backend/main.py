@@ -1410,17 +1410,25 @@ async def create_game_configuration(config_data: dict, request: Request, backgro
                 detail="Invalid result. Allowed: win, loss"
             )
         
-        # Validar que el deck pertenece al usuario
+        # Validar que el deck existe y que el usuario puede usarlo (es suyo o es público)
         deck_id = config_data.get('deck_id')
         conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id FROM decks WHERE id = ? AND user_id = ?
-        ''', (deck_id, user['id']))
-        
+            SELECT id, user_id, is_public FROM decks WHERE id = ?
+        ''', (deck_id,))
         deck_row = cursor.fetchone()
         if not deck_row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Deck not found"
+            )
+        deck_user_id = deck_row['user_id'] if deck_row['user_id'] is not None else None
+        is_public = deck_row['is_public'] if deck_row['is_public'] is not None else 1
+        # Permitir: es mazo del usuario, o es mazo público (de base de datos / importado)
+        if deck_user_id is not None and deck_user_id != user['id'] and not is_public:
             conn.close()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
