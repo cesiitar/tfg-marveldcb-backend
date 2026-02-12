@@ -1486,6 +1486,51 @@ async def create_game_configuration(config_data: dict, request: Request, backgro
             detail=f"Error creating game configuration: {str(e)}"
         )
 
+
+@app.delete("/api/game-configurations/{game_id}", status_code=200)
+async def delete_game_configuration(game_id: int, request: Request):
+    """Eliminar una partida del usuario. Solo se puede borrar una partida propia."""
+    try:
+        ensure_game_configurations_table()
+        auth0_id = request.headers.get('X-Auth0-ID')
+        if not auth0_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth0 ID header is required"
+            )
+        user = get_user_by_auth0_id(auth0_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found in database"
+            )
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT id FROM game_configurations WHERE id = ? AND user_id = ?',
+            (game_id, user['id'])
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Game not found or does not belong to user"
+            )
+        cursor.execute('DELETE FROM game_configurations WHERE id = ? AND user_id = ?', (game_id, user['id']))
+        conn.commit()
+        conn.close()
+        return {"message": "Partida eliminada correctamente"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error eliminando partida: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting game configuration: {str(e)}"
+        )
+
+
 @app.get("/api/game-configurations")
 async def get_game_configurations(request: Request):
     """Obtener todas las partidas del usuario autenticado"""
