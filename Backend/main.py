@@ -1121,31 +1121,22 @@ async def get_public_decks():
 
 @app.post("/api/decks", status_code=201)
 async def create_deck(deck_data: dict, request: Request):
-    """Crear un nuevo mazo"""
+    """Crear un nuevo mazo. La autenticación es opcional: sin login se crea un mazo público sin dueño (importación)."""
     try:
         ensure_decks_columns()
         auth0_id = request.headers.get('X-Auth0-ID')
         
         # Debug log
-        print(f"🔍 POST /api/decks - Auth0_ID recibido: {auth0_id}")
+        print(f"🔍 POST /api/decks - Auth0_ID recibido: {auth0_id or '(sin autenticación)'}")
         print(f"📦 Datos recibidos: {deck_data}")
         
-        if not auth0_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Auth0 ID header is required"
-            )
-        
-        user = get_user_by_auth0_id(auth0_id)
-        
-        if not user:
-            print(f"❌ Usuario no encontrado para Auth0_ID: {auth0_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found in database"
-            )
-        
-        print(f"✅ Usuario encontrado: ID={user['id']}, Name={user['name']}")
+        user = None
+        if auth0_id:
+            user = get_user_by_auth0_id(auth0_id)
+            if user:
+                print(f"✅ Usuario encontrado: ID={user['id']}, Name={user['name']}")
+            else:
+                print(f"⚠️ Auth0_ID presente pero usuario no encontrado en BD; se crea mazo sin dueño")
         
         # Validar datos requeridos
         if not deck_data.get('name') or not deck_data.get('hero_name') or not deck_data.get('cards') or not deck_data.get('aspect'):
@@ -1293,6 +1284,7 @@ async def create_deck(deck_data: dict, request: Request):
         print(f"💾 Insertando mazo en la base de datos...")
         print(f"📝 Descripción recibida: '{deck_data.get('description', '')}'") 
         print(f"🦸 Hero ID recibido: {deck_data.get('hero_id')}")
+        user_id_value = user["id"] if user else None
         cursor.execute('''
             INSERT INTO decks (name, description, hero_name, hero_id, aspect, cards, is_public, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1304,7 +1296,7 @@ async def create_deck(deck_data: dict, request: Request):
             deck_data.get("aspect"),
             json.dumps(processed_cards),
             1,  # Siempre público por ahora
-            user["id"]  # ID numérico del usuario
+            user_id_value  # NULL si no hay usuario (importación sin login)
         ))
         
         print(f"✅ Mazo insertado correctamente")
@@ -1324,7 +1316,7 @@ async def create_deck(deck_data: dict, request: Request):
                 "aspect": deck_data.get("aspect"),
                 "cards": processed_cards,
                 "created_at": current_time,
-                "creator_name": user.get("name")
+                "creator_name": user.get("name") if user else None
             }
         }
 
