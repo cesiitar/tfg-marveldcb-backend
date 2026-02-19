@@ -1316,7 +1316,8 @@ async def create_deck(deck_data: dict, request: Request):
                 "aspect": deck_data.get("aspect"),
                 "cards": processed_cards,
                 "created_at": current_time,
-                "creator_name": user.get("name") if user else None
+                "creator_name": user.get("name") if user else None,
+                "hero_unresolved": deck_data.get("hero_id") is None
             }
         }
 
