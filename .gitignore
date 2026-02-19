@@ -70,3 +70,7 @@ Backend/site-packages/
 # ML Models (generated automatically)
 *.pkl
 Backend/ml/saved_models/
+
+# Documentación local / memoria (no subir a repo)
+*.tex
+*.md
