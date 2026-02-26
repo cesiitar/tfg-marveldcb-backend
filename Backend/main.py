@@ -77,8 +77,6 @@ app.add_middleware(
 # Importar utilidades centralizadas de base de datos
 from db_utils import get_db_connection, get_db_path, verify_tables_exist
 
-# get_db_connection ya está importado de db_utils arriba
-
 def init_users_table():
     """Inicializar tabla de usuarios si no existe"""
     conn = get_db_connection()

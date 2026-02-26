@@ -42,33 +42,6 @@ def get_db_connection():
     return conn
 
 
-def ensure_table_exists(table_name: str, create_query: str = None):
-    """
-    Verifica que una tabla exista, y la crea si no existe.
-    
-    Args:
-        table_name: Nombre de la tabla a verificar
-        create_query: Query SQL para crear la tabla si no existe (opcional)
-    
-    Returns:
-        bool: True si la tabla existe o se creó exitosamente
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Verificar si la tabla existe
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-    exists = cursor.fetchone() is not None
-    
-    if not exists and create_query:
-        cursor.execute(create_query)
-        conn.commit()
-        exists = True
-    
-    conn.close()
-    return exists
-
-
 def verify_tables_exist(required_tables: list) -> bool:
     """
     Verifica que todas las tablas requeridas existan.

@@ -3,14 +3,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 import pickle
 import os
-import numpy as np
-import sqlite3
+import sys
 import json
-import random
+import numpy as np
 
 # Importar utilidades centralizadas de base de datos
-import sys
-import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from db_utils import get_db_connection
 

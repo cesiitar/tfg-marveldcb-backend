@@ -49,52 +49,6 @@ def get_game_data_from_db(db_path: str = None) -> pd.DataFrame:
     
     return df
 
-def get_top_cards_from_winning_decks(df: pd.DataFrame, top_n: int = 30, aspect: str = None, villain_id: int = None) -> list:
-    """
-    Identifica las cartas más importantes (las que aparecen más en mazos ganadores)
-    
-    Si se proporciona aspect y villain_id, filtra por esos criterios.
-    Si no, calcula top cartas globales (pero solo del aspecto correspondiente o básicas).
-    
-    Args:
-        df: DataFrame con partidas
-        top_n: Número de cartas top a retornar
-        aspect: Aspecto específico (opcional, para filtrar)
-        villain_id: ID del villano específico (opcional, para filtrar)
-    
-    Returns:
-        Lista de card_ids de las top N cartas más importantes
-    """
-    card_counts = {}  # {card_id: count}
-    
-    for idx, row in df.iterrows():
-        # Filtrar por resultado ganador
-        if row['result'] != 'win':
-            continue
-        
-        # Filtrar por aspecto si se proporciona
-        if aspect and row['aspect'] != aspect:
-            continue
-        
-        # Filtrar por villano si se proporciona
-        if villain_id and row['villain_id'] != villain_id:
-            continue
-        
-        try:
-            cards = json.loads(row['cards']) if row['cards'] else []
-            for card in cards:
-                card_id = card.get('card_id')
-                if card_id:
-                    card_counts[card_id] = card_counts.get(card_id, 0) + card.get('quantity', 1)
-        except:
-            continue
-    
-    # Ordenar por frecuencia y tomar las top N
-    sorted_cards = sorted(card_counts.items(), key=lambda x: x[1], reverse=True)
-    top_card_ids = [card_id for card_id, count in sorted_cards[:top_n]]
-    
-    return top_card_ids
-
 def prepare_features(df: pd.DataFrame, top_cards: list = None) -> Tuple[np.ndarray, np.ndarray, list]:
     """
     Prepara features para el modelo SVM usando solo características generales
