@@ -3148,13 +3148,13 @@ def map_marvelcdb_card_to_db(card_data: dict) -> dict:
         'aspect': aspect,  # aspect = clase (mapeado correctamente)
         'type': type_code,
         'cost': safe_int(card_data.get('cost'), 0),
-        'set_name': safe_str(card_data.get('pack_name'), ''),  # Nombre del pack
+        'set_name': safe_str(card_data.get('card_set_name') or card_data.get('pack_name') or card_data.get('pack_code'), ''),  # Set: card_set_name -> pack_name -> pack_code
         'set_code': safe_str(card_data.get('pack_code'), ''),  # Código del pack
         'pack_code': safe_str(card_data.get('pack_code'), ''),
         'pack_name': safe_str(card_data.get('pack_name'), ''),
         'faction_code': faction_code,  # Guardar el faction_code original (en minúsculas)
         'type_code': type_code,  # Guardar el type_code original (en minúsculas)
-        'card_set': safe_str(card_data.get('card_set_name') or card_data.get('pack_name'), ''),  # Set de la carta
+        'card_set': safe_str(card_data.get('card_set_name') or card_data.get('pack_name') or card_data.get('pack_code'), ''),  # Set: card_set_name -> pack_name -> pack_code
         'quantity': safe_int(card_data.get('quantity'), 1),
         'marvelcdb_code': marvelcdb_code,  # CRÍTICO: Guardar el code de MarvelCDB (ej: "01001")
         'deck_limit': None,  # Se procesa abajo
