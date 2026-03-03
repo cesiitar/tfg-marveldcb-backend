@@ -1,7 +1,9 @@
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, classification_report
 import pickle
 import os
+import json
 import sys
 
 # Añadir path para importar prepare_data
@@ -90,6 +92,35 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
     
     print(f"✅ Precisión entrenamiento: {train_score:.2%}")
     print(f"✅ Precisión prueba: {test_score:.2%}")
+    
+    # Matriz de confusión sobre el 20% de prueba (casos que el modelo no ha visto)
+    y_pred = model.predict(X_test)
+    cm = confusion_matrix(y_test, y_pred)
+    # Clases: 0 = loss (derrota), 1 = win (victoria)
+    print("\n📊 Matriz de confusión (conjunto de prueba, 20% no usado en entrenamiento):")
+    print("    Filas = resultado real | Columnas = predicción del modelo")
+    print("                 Pred. derrota  Pred. victoria")
+    print(f"    Real derrota      {cm[0, 0]:>6}           {cm[0, 1]:>6}")
+    print(f"    Real victoria     {cm[1, 0]:>6}           {cm[1, 1]:>6}")
+    print(f"    → Aciertos: {cm[0, 0] + cm[1, 1]} de {len(y_test)} (precisión prueba: {test_score:.2%})")
+    print(classification_report(y_test, y_pred, target_names=["derrota", "victoria"], zero_division=0))
+    
+    # Guardar matriz de confusión para documentación / memoria
+    eval_dir = os.path.join(os.path.dirname(__file__), '..')
+    eval_path = os.path.join(eval_dir, "evaluation_confusion_matrix.json")
+    try:
+        with open(eval_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "accuracy_train": float(train_score),
+                "accuracy_test": float(test_score),
+                "confusion_matrix": cm.tolist(),
+                "labels": ["derrota", "victoria"]
+            }, f, indent=2)
+        print(f"   (Matriz guardada en {eval_path})")
+    except Exception as e:
+        print(f"   (No se pudo guardar matriz: {e})")
     
     # Guardar modelo con metadata
     if model_path is None:
