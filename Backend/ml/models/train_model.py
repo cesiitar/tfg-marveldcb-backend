@@ -141,3 +141,14 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
     
     return model_data
 
+
+if __name__ == "__main__":
+    """
+    Punto de entrada para ejecutar el entrenamiento desde línea de comandos:
+    python -m ml.models.train_model
+    """
+    try:
+        train_villain_recommender()
+    except Exception as e:
+        print(f"Error entrenando modelo SVM: {e}")
+
