@@ -647,14 +647,15 @@ async def get_heroes():
 
 @app.get("/api/villains")
 async def get_villains():
-    """Obtener todos los nombres únicos de villanos (usando set o pack)."""
+    """Obtener todos los nombres únicos de villanos por nombre de carta (sin duplicados)."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener nombres únicos de villanos usando card_set o, en su defecto, pack_name
+    # Obtener nombres únicos de villanos usando el nombre de la carta ('name').
+    # Se hace TRIM para evitar duplicados por espacios.
     cursor.execute('''
         SELECT DISTINCT
-               COALESCE(card_set, pack_name, 'Unknown') AS name
+               TRIM(name) AS name
         FROM cards
         WHERE type = 'villain'
         ORDER BY name
@@ -669,17 +670,21 @@ async def get_villains():
 
 @app.get("/api/villains/with-ids")
 async def get_villains_with_ids():
-    """Obtener todos los villanos únicos con sus IDs para el frontend."""
+    """Obtener todos los villanos únicos con sus IDs para el frontend (un nombre por villano)."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener villanos únicos con ID y nombre (usando card_set o, en su defecto, pack_name)
+    # Obtener villanos únicos con ID y nombre usando el nombre de la carta ('name').
+    # Se agrupa por una versión normalizada del nombre (lower + trim) para evitar duplicados
+    # cuando solo cambian mayúsculas/minúsculas o espacios, y se toma el MIN(id) como
+    # identificador representativo.
     cursor.execute('''
-        SELECT MIN(id) AS id,
-               COALESCE(card_set, pack_name, 'Unknown') AS name
+        SELECT
+            MIN(id) AS id,
+            TRIM(name) AS name
         FROM cards
         WHERE type = 'villain'
-        GROUP BY name
+        GROUP BY LOWER(TRIM(name))
         ORDER BY name
     ''')
     
