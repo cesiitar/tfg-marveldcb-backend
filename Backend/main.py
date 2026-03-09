@@ -647,38 +647,40 @@ async def get_heroes():
 
 @app.get("/api/villains")
 async def get_villains():
-    """Obtener todos los nombres únicos de sets de villanos"""
+    """Obtener todos los nombres únicos de villanos (usando set o pack)."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener solo los nombres únicos de card_set de villanos
+    # Obtener nombres únicos de villanos usando card_set o, en su defecto, pack_name
     cursor.execute('''
-        SELECT DISTINCT card_set
-        FROM cards 
-        WHERE type = 'villain' AND card_set IS NOT NULL
-        ORDER BY card_set
+        SELECT DISTINCT
+               COALESCE(card_set, pack_name, 'Unknown') AS name
+        FROM cards
+        WHERE type = 'villain'
+        ORDER BY name
     ''')
     
     villains = []
     for row in cursor.fetchall():
-        villains.append(row["card_set"])
+        villains.append(row["name"])
     
     conn.close()
     return villains
 
 @app.get("/api/villains/with-ids")
 async def get_villains_with_ids():
-    """Obtener todos los villanos únicos con sus IDs para el frontend"""
+    """Obtener todos los villanos únicos con sus IDs para el frontend."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Obtener villanos únicos con ID y nombre (solo el primer ID de cada villano)
+    # Obtener villanos únicos con ID y nombre (usando card_set o, en su defecto, pack_name)
     cursor.execute('''
-        SELECT MIN(id) as id, card_set as name
-        FROM cards 
-        WHERE type = 'villain' AND card_set IS NOT NULL
-        GROUP BY card_set
-        ORDER BY card_set
+        SELECT MIN(id) AS id,
+               COALESCE(card_set, pack_name, 'Unknown') AS name
+        FROM cards
+        WHERE type = 'villain'
+        GROUP BY name
+        ORDER BY name
     ''')
     
     villains = []
