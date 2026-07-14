@@ -64,7 +64,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # Frontend local
         "http://localhost:5173",  # Vite dev server
-        "https://aiforge.vercel.app",  # Dominio principal en producción
+        "https://aiforge-decks.vercel.app",  # Dominio principal en producción
         "https://frontend-sigma-dusky-21.vercel.app",  # Frontend en producción (Vercel)
         "https://cesiitar.github.io",  # GitHub Pages (si planeas usar GitHub Pages)
         "https://tfg-marveldcb-frontend.vercel.app",  # Vercel (ejemplo)

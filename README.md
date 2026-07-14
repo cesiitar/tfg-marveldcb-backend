@@ -1,6 +1,6 @@
 # AIForge — Backend
 
-API y motor de IA de **AIForge**, mi Trabajo de Fin de Grado: una plataforma web para crear, compartir y optimizar mazos de Marvel Champions usando machine learning. La interfaz está en [tfg-marveldcb-frontend](https://github.com/cesiitar/tfg-marveldcb-frontend) (desplegada en https://frontend-sigma-dusky-21.vercel.app).
+API y motor de IA de **AIForge**, mi Trabajo de Fin de Grado: una plataforma web para crear, compartir y optimizar mazos de Marvel Champions usando machine learning. La interfaz está en [tfg-marveldcb-frontend](https://github.com/cesiitar/tfg-marveldcb-frontend) (desplegada en https://aiforge-decks.vercel.app).
 
 ## Qué hace
 
