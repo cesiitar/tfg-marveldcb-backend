@@ -28,6 +28,8 @@ async def startup_event():
     ensure_game_configurations_table()
     ensure_user_favorites_table()
     ensure_deck_comments_table()
+    # Añade en segundo plano los sets y cartas nuevos de MarvelCDB (solo inserta, nunca borra)
+    start_background_sync()
 
 def get_user_by_auth0_id(auth0_id: str):
     """Helper function to get user by Auth0 ID"""
@@ -79,6 +81,7 @@ app.add_middleware(
 
 # Importar utilidades centralizadas de base de datos
 from db_utils import get_db_connection, get_db_path, verify_tables_exist
+from catalog_sync import start_background_sync
 
 def init_users_table():
     """Inicializar tabla de usuarios si no existe"""
