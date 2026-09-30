@@ -24,6 +24,7 @@ app.include_router(recommendations_router, prefix="/api", tags=["recommendations
 async def startup_event():
     """Inicializar tablas necesarias al arrancar la aplicación"""
     init_users_table()
+    ensure_users_display_name()
     ensure_decks_columns()
     ensure_game_configurations_table()
     ensure_user_favorites_table()
@@ -40,7 +41,7 @@ def get_user_by_auth0_id(auth0_id: str):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, auth0_id, email, name, picture_url, created_at
+        SELECT id, auth0_id, email, name, display_name, picture_url, created_at
         FROM users 
         WHERE auth0_id = ?
     ''', (auth0_id,))
@@ -56,6 +57,7 @@ def get_user_by_auth0_id(auth0_id: str):
         "auth0_id": user_row["auth0_id"],
         "email": user_row["email"],
         "name": user_row["name"],
+        "display_name": user_row["display_name"],
         "picture_url": user_row["picture_url"],
         "created_at": user_row["created_at"]
     }
@@ -82,6 +84,40 @@ app.add_middleware(
 # Importar utilidades centralizadas de base de datos
 from db_utils import get_db_connection, get_db_path, verify_tables_exist
 from catalog_sync import start_background_sync
+
+DISPLAY_NAME_MIN = 3
+DISPLAY_NAME_MAX = 30
+DISPLAY_NAME_PATTERN = re.compile(r"^[\w .\-]+$", re.UNICODE)
+
+
+def default_display_name(name: Optional[str], email: Optional[str] = None) -> str:
+    """Nombre público por defecto: no expone apellidos ni correos.
+
+    "Marta Jimenez" -> "Marta J." · "alguien@gmail.com" -> "alguien" · "cesiitar_06" -> igual
+    """
+    base = (name or '').strip() or (email or '').strip()
+    if '@' in base:
+        base = base.split('@')[0]
+    words = base.split()
+    if len(words) >= 2 and len(words[0]) >= 3 and all(w.replace('-', '').isalpha() for w in words):
+        base = f"{words[0]} {words[1][0].upper()}."
+    return base[:DISPLAY_NAME_MAX] or 'Usuario'
+
+
+def ensure_users_display_name():
+    """Añade users.display_name (nombre público) y lo rellena para quien aún no lo tenga."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(users)")
+    if 'display_name' not in [column[1] for column in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+    cursor.execute("SELECT id, name, email FROM users WHERE display_name IS NULL OR display_name = ''")
+    for row in cursor.fetchall():
+        cursor.execute("UPDATE users SET display_name = ? WHERE id = ?",
+                       (default_display_name(row["name"], row["email"]), row["id"]))
+    conn.commit()
+    conn.close()
+
 
 def init_users_table():
     """Inicializar tabla de usuarios si no existe"""
@@ -472,9 +508,9 @@ async def sync_user(user_data: dict):
         
         # Crear usuario en la base de datos
         cursor.execute('''
-            INSERT INTO users (auth0_id, email, name, picture_url)
-            VALUES (?, ?, ?, ?)
-        ''', (auth0_id, email, name, picture))
+            INSERT INTO users (auth0_id, email, name, picture_url, display_name)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (auth0_id, email, name, picture, default_display_name(name, email)))
         
         user_id = cursor.lastrowid
         conn.commit()
@@ -1097,7 +1133,7 @@ async def get_public_decks():
                 uid = row["user_id"]
                 if uid:
                     # Ahora user_id es el ID numérico, no el auth0_id
-                    cursor.execute('SELECT name FROM users WHERE id = ?', (uid,))
+                    cursor.execute("SELECT COALESCE(NULLIF(display_name, ''), name) FROM users WHERE id = ?", (uid,))
                     user_row = cursor.fetchone()
                     if user_row and user_row[0]:
                         creator_name = user_row[0]
@@ -1327,7 +1363,7 @@ async def create_deck(deck_data: dict, request: Request):
                 "aspect": deck_data.get("aspect"),
                 "cards": processed_cards,
                 "created_at": current_time,
-                "creator_name": user.get("name") if user else None,
+                "creator_name": (user.get("display_name") or user.get("name")) if user else None,
                 "hero_unresolved": deck_data.get("hero_id") is None
             }
         }
@@ -1581,7 +1617,7 @@ async def get_game_configurations(request: Request):
                 d.hero_name,
                 d.aspect,
                 COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
-                u.name as creator_name
+                COALESCE(NULLIF(u.display_name, ''), u.name) as creator_name
             FROM game_configurations gc
             INNER JOIN decks d ON gc.deck_id = d.id
             LEFT JOIN cards c ON gc.villain_id = c.id
@@ -1654,7 +1690,7 @@ async def get_all_game_configurations():
                 d.aspect,
                 d.user_id,
                 COALESCE(c.name, c.card_set, 'Unknown') as villain_name,
-                u.name as creator_name
+                COALESCE(NULLIF(u.display_name, ''), u.name) as creator_name
             FROM game_configurations gc
             INNER JOIN decks d ON gc.deck_id = d.id
             LEFT JOIN cards c ON gc.villain_id = c.id
@@ -1900,7 +1936,7 @@ async def get_deck(deck_id: int):
             uid_row = cursor.fetchone()
             if uid_row and uid_row[0]:
                 # Ahora user_id es el ID numérico, no el auth0_id
-                cursor.execute('SELECT name FROM users WHERE id = ?', (uid_row[0],))
+                cursor.execute("SELECT COALESCE(NULLIF(display_name, ''), name) FROM users WHERE id = ?", (uid_row[0],))
                 user_row = cursor.fetchone()
                 if user_row and user_row[0]:
                     creator_name = user_row[0]
@@ -2124,7 +2160,7 @@ async def get_deck_comments(deck_id: int):
                 dc.comment_text,
                 dc.created_at,
                 dc.updated_at,
-                u.name as author_name
+                COALESCE(NULLIF(u.display_name, ''), u.name) as author_name
             FROM deck_comments dc
             LEFT JOIN users u ON dc.auth0_id = u.auth0_id
             WHERE dc.deck_id = ?
@@ -2229,7 +2265,7 @@ async def create_deck_comment(deck_id: int, comment_data: dict, request: Request
                 dc.comment_text,
                 dc.created_at,
                 dc.updated_at,
-                u.name as author_name
+                COALESCE(NULLIF(u.display_name, ''), u.name) as author_name
             FROM deck_comments dc
             LEFT JOIN users u ON dc.auth0_id = u.auth0_id
             WHERE dc.id = ?
@@ -2355,7 +2391,7 @@ async def update_deck_comment(comment_id: int, comment_data: dict, request: Requ
                 dc.comment_text,
                 dc.created_at,
                 dc.updated_at,
-                u.name as author_name
+                COALESCE(NULLIF(u.display_name, ''), u.name) as author_name
             FROM deck_comments dc
             LEFT JOIN users u ON dc.auth0_id = u.auth0_id
             WHERE dc.id = ?
@@ -2486,6 +2522,7 @@ async def get_user_profile(request: Request):
             "id": user["id"],
             "email": user["email"],
             "name": user["name"],
+            "display_name": user.get("display_name") or default_display_name(user["name"], user["email"]),
             "auth0_id": user["auth0_id"],
             "created_at": user["created_at"]
         }
@@ -2497,6 +2534,44 @@ async def get_user_profile(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str
+
+
+@app.put("/api/user/profile")
+async def update_user_profile(payload: UpdateProfileRequest, request: Request):
+    """Cambiar el nombre público (el que ven los demás en mazos, comentarios y partidas)."""
+    auth0_id = request.headers.get('X-Auth0-ID')
+    if not auth0_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Auth0 ID header is required")
+
+    user = get_user_by_auth0_id(auth0_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in database")
+
+    display_name = " ".join(payload.display_name.split())
+    if not (DISPLAY_NAME_MIN <= len(display_name) <= DISPLAY_NAME_MAX):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El nombre público debe tener entre {DISPLAY_NAME_MIN} y {DISPLAY_NAME_MAX} caracteres"
+        )
+    if not DISPLAY_NAME_PATTERN.match(display_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El nombre público solo puede tener letras, números, espacios, puntos, guiones y guiones bajos"
+        )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (display_name, user["id"])
+    )
+    conn.commit()
+    conn.close()
+    return {"display_name": display_name}
 
 @app.get("/api/user/stats")
 async def get_user_stats(request: Request):
@@ -2646,7 +2721,7 @@ async def get_user_decks(request: Request):
                 cards_data.append(card_data)
             
             # Obtener nombre del creador (el propio usuario)
-            creator_name = user.get("name")
+            creator_name = user.get("display_name") or user.get("name")
 
             deck = {
                 "id": row["id"],
