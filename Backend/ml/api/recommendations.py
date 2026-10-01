@@ -174,7 +174,7 @@ def get_villain_name(villain_id: int) -> Optional[str]:
         cursor.execute('''
             SELECT card_set 
             FROM cards 
-            WHERE id = ? AND type = 'villain'
+            WHERE id = ? AND type IN ('villain', 'leader')
         ''', (villain_id,))
         result = cursor.fetchone()
         conn.close()

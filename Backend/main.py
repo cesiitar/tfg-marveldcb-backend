@@ -12,7 +12,7 @@ import requests
 # Añadir path para importar módulos ML
 sys.path.append(os.path.dirname(__file__))
 from ml.api.recommendations import router as recommendations_router
-from ml.models.train_model import train_villain_recommender
+from ml.models.train_model import train_villain_recommender, get_metrics_path
 
 app = FastAPI(title="MarvelCDB API", version="1.0.0")
 
@@ -31,6 +31,14 @@ async def startup_event():
     ensure_deck_comments_table()
     # Añade en segundo plano los sets y cartas nuevos de MarvelCDB (solo inserta, nunca borra)
     start_background_sync()
+    # Si el modelo aún no tiene métricas públicas (entrenado antes de que existieran), se
+    # reentrena una vez en segundo plano con las mismas partidas para generarlas.
+    try:
+        if not os.path.exists(get_metrics_path()):
+            import threading
+            threading.Thread(target=train_model_in_background, name="model-metrics", daemon=True).start()
+    except Exception as e:
+        print(f"[model-metrics] No se pudieron preparar las métricas: {e}", flush=True)
 
 def get_user_by_auth0_id(auth0_id: str):
     """Helper function to get user by Auth0 ID"""
@@ -176,6 +184,11 @@ def ensure_decks_columns():
         cursor.execute('ALTER TABLE decks ADD COLUMN hero_id INTEGER')
         altered = True
 
+    # source_url: enlace al mazo original cuando se importa de MarvelCDB (atribución)
+    if 'source_url' not in columns:
+        cursor.execute('ALTER TABLE decks ADD COLUMN source_url TEXT')
+        altered = True
+
     if altered:
         conn.commit()
     conn.close()
@@ -228,7 +241,7 @@ def ensure_game_configurations_table():
             # Buscar el ID del villano por nombre
             cursor.execute('''
                 SELECT id FROM cards 
-                WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
+                WHERE type IN ('villain', 'leader') AND LOWER(card_set) = LOWER(?)
                 LIMIT 1
             ''', (villain_name,))
             
@@ -533,6 +546,16 @@ async def sync_user(user_data: dict):
     finally:
         conn.close()
 
+@app.get("/api/model/stats")
+async def get_model_stats():
+    """Cifras públicas del último entrenamiento del modelo de recomendación."""
+    try:
+        with open(get_metrics_path(), encoding='utf-8') as f:
+            return {"available": True, **json.load(f)}
+    except Exception:
+        return {"available": False}
+
+
 @app.get("/api/sets")
 async def get_sets():
     """Obtener todos los sets de cartas"""
@@ -561,8 +584,17 @@ async def get_sets():
                 "cardCount": real_card_count
             })
     
+    # Fecha de la última sincronización con MarvelCDB (catalog_sync.py); None si aún no hubo
+    synced_at = None
+    try:
+        cursor.execute("SELECT value FROM app_meta WHERE key = 'catalog_last_sync'")
+        row = cursor.fetchone()
+        synced_at = row[0] if row else None
+    except sqlite3.Error:
+        pass
+
     conn.close()
-    return {"sets": sets}
+    return {"sets": sets, "catalog_synced_at": synced_at}
 
 @app.get("/api/sets/{set_id}/cards")
 async def get_cards_by_set(
@@ -687,6 +719,8 @@ async def get_heroes():
     conn.close()
     return heroes  # Devolver array directo como espera el frontend
 
+# Villanos: MarvelCDB llama "leader" a los villanos de las cajas recientes (Civil War,
+# Synthezoid Smackdown: Iron Man, Captain Marvel, She-Hulk…), así que cuentan ambos tipos.
 @app.get("/api/villains")
 async def get_villains():
     """Obtener todos los nombres únicos de villanos por nombre de carta (sin duplicados)."""
@@ -699,7 +733,7 @@ async def get_villains():
         SELECT DISTINCT
                TRIM(name) AS name
         FROM cards
-        WHERE type = 'villain'
+        WHERE type IN ('villain', 'leader')
         ORDER BY name
     ''')
     
@@ -725,7 +759,7 @@ async def get_villains_with_ids():
             MIN(id) AS id,
             TRIM(name) AS name
         FROM cards
-        WHERE type = 'villain'
+        WHERE type IN ('villain', 'leader')
         GROUP BY LOWER(TRIM(name))
         ORDER BY name
     ''')
@@ -749,7 +783,7 @@ async def get_villain_id(villain_name: str):
     # Buscar el villano por nombre (case-insensitive) y tomar el primer ID
     cursor.execute('''
         SELECT MIN(id) FROM cards 
-        WHERE type = 'villain' AND LOWER(card_set) = LOWER(?)
+        WHERE type IN ('villain', 'leader') AND LOWER(card_set) = LOWER(?)
     ''', (villain_name,))
     
     villain_row = cursor.fetchone()
@@ -1046,7 +1080,7 @@ async def get_public_decks():
     # Incluir conteo de favoritos usando LEFT JOIN con user_favorites
     if 'user_id' in columns:
         cursor.execute('''
-            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.user_id,
+            SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.user_id, d.source_url,
                    COALESCE(COUNT(uf.id), 0) as favorite_count
             FROM decks d
             LEFT JOIN user_favorites uf ON d.id = uf.deck_id
@@ -1150,7 +1184,8 @@ async def get_public_decks():
             "cards": cards_data,
             "created_at": row["created_at"],
             "creator_name": creator_name,
-            "favorite_count": row["favorite_count"]
+            "favorite_count": row["favorite_count"],
+            "source_url": row["source_url"] if "source_url" in row.keys() else None
         }
         
         # Añadir información del usuario si existe
@@ -1332,9 +1367,13 @@ async def create_deck(deck_data: dict, request: Request):
         print(f"📝 Descripción recibida: '{deck_data.get('description', '')}'") 
         print(f"🦸 Hero ID recibido: {deck_data.get('hero_id')}")
         user_id_value = user["id"] if user else None
+        # Origen del mazo (importado de MarvelCDB): solo se acepta un enlace a un decklist de MarvelCDB
+        source_url = deck_data.get("source_url")
+        if not (isinstance(source_url, str) and re.fullmatch(r"https://marvelcdb\.com/decklist/view/\d+(/[\w\-]*)?", source_url)):
+            source_url = None
         cursor.execute('''
-            INSERT INTO decks (name, description, hero_name, hero_id, aspect, cards, is_public, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO decks (name, description, hero_name, hero_id, aspect, cards, is_public, user_id, source_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             deck_data.get("name", ""),
             deck_data.get("description", ""),
@@ -1343,7 +1382,8 @@ async def create_deck(deck_data: dict, request: Request):
             deck_data.get("aspect"),
             json.dumps(processed_cards),
             1,  # Siempre público por ahora
-            user_id_value  # NULL si no hay usuario (importación sin login)
+            user_id_value,  # NULL si no hay usuario (importación sin login)
+            source_url
         ))
         
         print(f"✅ Mazo insertado correctamente")
@@ -1478,7 +1518,7 @@ async def create_game_configuration(config_data: dict, request: Request, backgro
         # Validar que el villano existe por ID
         villain_id = config_data.get('villain_id')
         cursor.execute('''
-            SELECT COUNT(*) FROM cards WHERE type = 'villain' AND id = ?
+            SELECT COUNT(*) FROM cards WHERE type IN ('villain', 'leader') AND id = ?
         ''', (villain_id,))
         
         villain_count = cursor.fetchone()[0]
@@ -1853,7 +1893,7 @@ async def get_deck(deck_id: int):
     
     # Incluir conteo de favoritos usando LEFT JOIN con user_favorites
     cursor.execute('''
-        SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at,
+        SELECT d.id, d.name, d.description, d.hero_name, d.hero_id, d.aspect, d.cards, d.created_at, d.source_url,
                COALESCE(COUNT(uf.id), 0) as favorite_count
         FROM decks d
         LEFT JOIN user_favorites uf ON d.id = uf.deck_id
@@ -1953,7 +1993,8 @@ async def get_deck(deck_id: int):
         "cards": cards_data,
         "created_at": row["created_at"],
         "creator_name": creator_name,
-        "favorite_count": row["favorite_count"]
+        "favorite_count": row["favorite_count"],
+        "source_url": row["source_url"] if "source_url" in row.keys() else None
     }
     
     print(f"📤 Devolviendo mazo con descripción: '{row['description']}'")

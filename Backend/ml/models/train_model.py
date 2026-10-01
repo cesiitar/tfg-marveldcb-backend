@@ -5,6 +5,7 @@ import pickle
 import os
 import json
 import sys
+from datetime import datetime, timezone
 
 # Añadir path para importar prepare_data
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -19,6 +20,34 @@ def get_default_model_path() -> str:
     if not env_model_path:
         raise ValueError("MODEL_PATH environment variable is required to save/load the model")
     return env_model_path
+
+
+def get_metrics_path(model_path: str = None) -> str:
+    """Métricas públicas del último entrenamiento, junto al modelo (disco persistente)."""
+    model_path = model_path or get_default_model_path()
+    return os.path.splitext(model_path)[0] + '_metrics.json'
+
+
+def _save_public_metrics(model_path, X, y, n_train, n_test, train_score, test_score):
+    """Guarda las cifras que muestra la web (/api/model/stats). Nunca rompe el entrenamiento."""
+    try:
+        rows = [list(row) for row in X]
+        metrics = {
+            "games": len(rows),
+            "wins": int(sum(y)),
+            "n_train": int(n_train),
+            "n_test": int(n_test),
+            "accuracy_train": round(float(train_score), 4),
+            "accuracy_test": round(float(test_score), 4),
+            # Columnas 0 y 2 de las características: héroe y villano de cada partida
+            "heroes": len({row[0] for row in rows}),
+            "villains": len({row[2] for row in rows}),
+            "trained_at": datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        }
+        with open(get_metrics_path(model_path), 'w', encoding='utf-8') as f:
+            json.dump(metrics, f, indent=2)
+    except Exception as e:
+        print(f"   (No se pudieron guardar las métricas públicas: {e})")
 
 
 def train_villain_recommender(db_path: str = None, model_path: str = None):
@@ -135,6 +164,8 @@ def train_villain_recommender(db_path: str = None, model_path: str = None):
     with open(model_path, 'wb') as f:
         pickle.dump(model_data, f)
     
+    _save_public_metrics(model_path, X, y, len(X_train), len(X_test), train_score, test_score)
+
     print(f"💾 Modelo guardado en: {model_path}")
     print(f"   - Usa {len(feature_names)} características generales")
     print(f"   - Las cartas se seleccionan dinámicamente según villano y aspecto")
